@@ -1,0 +1,5 @@
+go 1.23
+
+use (
+	// Add modules here: ./cmd/myutil, ./pkg/mylib
+)
