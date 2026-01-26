@@ -1,0 +1,111 @@
+version: "3.8"
+
+services:
+  geth:
+    image: ${GETH_IMAGE:-ethereum/client-go:stable}
+    container_name: eth-devnet-geth
+    restart: unless-stopped
+    networks:
+      - eth-devnet
+    ports:
+      - "${EL_HTTP_PORT:-8545}:8545"
+      - "${EL_WS_PORT:-8546}:8546"
+      - "${EL_AUTH_PORT:-8551}:8551"
+      - "${EL_P2P_PORT:-30303}:30303/tcp"
+      - "${EL_P2P_PORT:-30303}:30303/udp"
+    volumes:
+      - ../data/el:/data
+      - ../data/genesis:/genesis:ro
+      - ../data/jwt:/jwt:ro
+    command:
+      - --datadir=/data
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.api=eth,net,web3,engine,admin,debug,txpool
+      - --http.corsdomain=*
+      - --http.vhosts=*
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.api=eth,net,web3,engine,admin,debug,txpool
+      - --ws.origins=*
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.vhosts=*
+      - --authrpc.jwtsecret=/jwt/jwt.hex
+      - --networkid=${NETWORK_ID:-1337}
+      - --nodiscover
+      - --syncmode=full
+      - --gcmode=archive
+      - --allow-insecure-unlock
+
+  beacon:
+    image: ${LIGHTHOUSE_IMAGE:-sigp/lighthouse:latest}
+    container_name: eth-devnet-beacon
+    restart: unless-stopped
+    depends_on:
+      - geth
+    networks:
+      - eth-devnet
+    ports:
+      - "${CL_HTTP_PORT:-5052}:5052"
+      - "${CL_P2P_PORT:-9000}:9000/tcp"
+      - "${CL_P2P_PORT:-9000}:9000/udp"
+      - "${CL_METRICS_PORT:-5054}:5054"
+    volumes:
+      - ../data/cl/beacon:/data
+      - ../data/genesis:/genesis:ro
+      - ../data/jwt:/jwt:ro
+    command:
+      - lighthouse
+      - beacon_node
+      - --datadir=/data
+      - --testnet-dir=/genesis
+      - --execution-endpoint=http://geth:8551
+      - --execution-jwt=/jwt/jwt.hex
+      - --http
+      - --http-address=0.0.0.0
+      - --http-port=5052
+      - --http-allow-origin=*
+      - --metrics
+      - --metrics-address=0.0.0.0
+      - --metrics-port=5054
+      - --disable-peer-scoring
+      - --enable-private-discovery
+      - --staking
+      - --enr-address=127.0.0.1
+      - --enr-udp-port=9000
+      - --enr-tcp-port=9000
+      - --disable-packet-filter
+      - --subscribe-all-subnets
+      - --slots-per-restore-point=32
+
+  validator:
+    image: ${LIGHTHOUSE_IMAGE:-sigp/lighthouse:latest}
+    container_name: eth-devnet-validator
+    restart: unless-stopped
+    depends_on:
+      - beacon
+    networks:
+      - eth-devnet
+    volumes:
+      - ../data/cl/validator:/data
+      - ../data/keys:/keys:ro
+    command:
+      - lighthouse
+      - validator_client
+      - --datadir=/data
+      - --beacon-nodes=http://beacon:5052
+      - --init-slashing-protection
+      - --suggested-fee-recipient=${DEV_ACCOUNT:-0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266}
+      - --graffiti=eth-devnet
+      - --http
+      - --http-address=0.0.0.0
+      - --http-port=5062
+      - --unencrypted-http-transport
+      - --http-allow-origin=*
+
+networks:
+  eth-devnet:
+    name: eth-devnet-network
