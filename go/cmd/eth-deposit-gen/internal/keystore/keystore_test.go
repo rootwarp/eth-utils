@@ -308,6 +308,48 @@ func TestLoad_PBKDF2FixtureFile(t *testing.T) {
 	}
 }
 
+func TestLoad_MissingCryptoField(t *testing.T) {
+	ks := map[string]any{
+		"pubkey":  testPubkeyHex,
+		"version": 4,
+		"uuid":    "00000000-0000-0000-0000-000000000004",
+		"path":    "",
+		// no "crypto" key — envelope.Crypto will be nil after unmarshal
+	}
+	data, _ := json.Marshal(ks)
+	path := writeFixture(t, data)
+
+	loader := keystore.NewLoader()
+	_, err := loader.Load(context.Background(), path, newBytesSource(testPassphrase))
+	if err == nil {
+		t.Fatal("Load() error = nil, want ErrKeystoreMalformed")
+	}
+	if !errors.Is(err, keystore.ErrKeystoreMalformed) {
+		t.Errorf("Load() error = %v, want errors.Is ErrKeystoreMalformed", err)
+	}
+}
+
+func TestLoad_UnreadableFile(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; chmod 000 has no effect")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keystore.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0000); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	loader := keystore.NewLoader()
+	_, err := loader.Load(context.Background(), path, newBytesSource(testPassphrase))
+	if err == nil {
+		t.Fatal("Load() error = nil, want read error")
+	}
+	// Must NOT be ErrKeystoreMissing — file exists but is unreadable.
+	if errors.Is(err, keystore.ErrKeystoreMissing) {
+		t.Errorf("Load() error = %v, must not be ErrKeystoreMissing for permission-denied", err)
+	}
+}
+
 // TestLoad_PassphraseSourceError covers the path where the PassphraseSource
 // returns an error (e.g. ErrEnvVarEmpty).
 func TestLoad_PassphraseSourceError(t *testing.T) {

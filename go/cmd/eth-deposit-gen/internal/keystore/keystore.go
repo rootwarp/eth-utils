@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
@@ -41,8 +42,9 @@ type Key struct {
 	// Secret is the raw 32-byte BLS signing secret. Zeroize after use.
 	Secret []byte
 
-	// PubkeyHex is the 96-character lowercase hex public key declared in the
-	// keystore JSON, without a 0x prefix.
+	// PubkeyHex is the lowercase hex-encoded public key declared in the keystore
+	// JSON, without a 0x prefix. It is passed through as-is from the JSON; the
+	// loader does not validate its length or that it matches Secret.
 	PubkeyHex string
 }
 
@@ -101,7 +103,7 @@ func (l *loader) Load(_ context.Context, path string, pw PassphraseSource) (Key,
 		if os.IsNotExist(err) {
 			return Key{}, fmt.Errorf("%w: %s", ErrKeystoreMissing, path)
 		}
-		return Key{}, fmt.Errorf("%w: read %s: %v", ErrKeystoreMissing, path, err)
+		return Key{}, fmt.Errorf("read keystore %s: %w", path, err)
 	}
 
 	var envelope keystoreEnvelope
@@ -148,8 +150,10 @@ func (l *loader) Load(_ context.Context, path string, pw PassphraseSource) (Key,
 }
 
 // zeroizeBytes overwrites every byte of b with 0x00.
+// runtime.KeepAlive prevents the compiler from treating the writes as dead stores.
 func zeroizeBytes(b []byte) {
 	for i := range b {
 		b[i] = 0x00
 	}
+	runtime.KeepAlive(b)
 }
