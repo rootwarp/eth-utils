@@ -34,6 +34,11 @@ type Config struct {
 	// PassphraseEnv is the name of the environment variable holding the keystore
 	// passphrase. An empty string means the tool will fall back to a TTY prompt.
 	PassphraseEnv string
+
+	// MainnetAck is true when the operator passed --i-understand-this-is-mainnet,
+	// explicitly acknowledging that mainnet deposit data has irreversible financial
+	// consequences. Required when Network == network.Mainnet.
+	MainnetAck bool
 }
 
 // NewApp constructs and returns a configured *cli.App. The run callback receives
@@ -104,15 +109,26 @@ OPTIONS:
 			Name:  "passphrase-env",
 			Usage: "Name of the environment variable holding the keystore passphrase (omit for TTY prompt)",
 		},
+		&ucli.BoolFlag{
+			Name:  "i-understand-this-is-mainnet",
+			Usage: "Required when --network mainnet: acknowledges this produces REAL mainnet deposit data with irreversible financial consequences",
+		},
 	}
 
 	app.Action = func(c *ucli.Context) error {
-		// Validation order: network first (per spec), then pubkeys, then output-dir.
+		// Validation order: network first (per spec), then mainnet ack, then pubkeys, then output-dir.
 
 		// 1. Parse and validate --network
 		net, err := network.ParseFlag(c.String("network"))
 		if err != nil {
 			return ucli.Exit(fmt.Sprintf("--network: %v", err), 2)
+		}
+
+		// 1a. Mainnet safety gate: require explicit operator acknowledgement before
+		// any signing work begins. This must happen before printBanner and before run().
+		mainnetAck := c.Bool("i-understand-this-is-mainnet")
+		if net == network.Mainnet && !mainnetAck {
+			return ucli.Exit("mainnet selected; pass --i-understand-this-is-mainnet to acknowledge", 2)
 		}
 
 		// 2. Parse and validate --pubkeys
@@ -133,6 +149,7 @@ OPTIONS:
 			Network:       net,
 			OutputDir:     outputDir,
 			PassphraseEnv: c.String("passphrase-env"),
+			MainnetAck:    mainnetAck,
 		}
 
 		// 4. Print confirmation banner to stderr before invoking run.
@@ -232,9 +249,19 @@ func validateOutputDir(dir string) error {
 	return nil
 }
 
+// networkDisplay returns the network name for display in the banner.
+// Mainnet is shown in uppercase ("MAINNET") as an additional visual safety cue;
+// all other networks use their lowercase string representation.
+func networkDisplay(n network.Network) string {
+	if n == network.Mainnet {
+		return "MAINNET"
+	}
+	return string(n)
+}
+
 // printBanner writes the confirmation banner to w (which should be app.ErrWriter).
 // Format: eth-deposit-gen: network=<net> first_pubkey=<hex> last_pubkey=<hex> count=<n>
-// Pubkeys are rendered as 0x-prefixed lowercase hex.
+// Pubkeys are rendered as 0x-prefixed lowercase hex. Mainnet is shown as "MAINNET".
 func printBanner(w io.Writer, cfg Config) {
 	if len(cfg.Pubkeys) == 0 {
 		return
@@ -242,8 +269,8 @@ func printBanner(w io.Writer, cfg Config) {
 	first := cfg.Pubkeys[0]
 	last := cfg.Pubkeys[len(cfg.Pubkeys)-1]
 	fmt.Fprintf(w, "eth-deposit-gen: network=%s first_pubkey=0x%x last_pubkey=0x%x count=%d\n",
-		cfg.Network,
+		networkDisplay(cfg.Network),
 		first[:],
 		last[:],
-	len(cfg.Pubkeys))
+		len(cfg.Pubkeys))
 }

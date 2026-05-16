@@ -169,6 +169,11 @@ func TestInvalidNetwork(t *testing.T) {
 					"--output-dir", dir,
 				}
 			}
+			// Mainnet requires the ack flag; supply it so this test focuses on
+			// network parsing only, not on the mainnet-ack gate.
+			if tc.network == "mainnet" {
+				args = append(args, "--i-understand-this-is-mainnet")
+			}
 			_, _, called, err := runApp(t, args)
 			if tc.wantErr {
 				if err == nil {
@@ -549,5 +554,94 @@ func TestErrorIsExitCoder(t *testing.T) {
 	}
 	if exitErr.ExitCode() != 2 {
 		t.Errorf("ExitCode = %d, want 2 (validation error per PRD)", exitErr.ExitCode())
+	}
+}
+
+// TestMainnetWithoutAck verifies that --network mainnet without --i-understand-this-is-mainnet
+// returns exit code 2 and never invokes the run callback.
+func TestMainnetWithoutAck(t *testing.T) {
+	dir := t.TempDir()
+	args := []string{
+		"--validator-key-path", "/fake/path",
+		"--pubkeys", "0x" + validPubkey,
+		"--network", "mainnet",
+		"--output-dir", dir,
+		// Intentionally omitting --i-understand-this-is-mainnet
+	}
+	_, _, called, err := runApp(t, args)
+	if err == nil {
+		t.Fatal("runApp mainnet without ack: error = nil, want error")
+	}
+	if called {
+		t.Fatal("run callback was invoked without mainnet ack, want it not called")
+	}
+
+	exitErr, ok := err.(ucli.ExitCoder)
+	if !ok {
+		t.Fatalf("error type %T is not ucli.ExitCoder", err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Errorf("ExitCode = %d, want 2", exitErr.ExitCode())
+	}
+	if !strings.Contains(err.Error(), "mainnet selected") {
+		t.Errorf("error message %q does not contain %q", err.Error(), "mainnet selected")
+	}
+}
+
+// TestMainnetWithAck verifies that --network mainnet --i-understand-this-is-mainnet
+// allows signing to proceed and emits a banner containing "MAINNET" (uppercase).
+func TestMainnetWithAck(t *testing.T) {
+	dir := t.TempDir()
+	args := []string{
+		"--validator-key-path", "/some/keystore.json",
+		"--pubkeys", "0x" + validPubkey,
+		"--network", "mainnet",
+		"--output-dir", dir,
+		"--i-understand-this-is-mainnet",
+	}
+	cfg, stderr, called, err := runApp(t, args)
+	if err != nil {
+		t.Fatalf("runApp mainnet with ack: %v", err)
+	}
+	if !called {
+		t.Fatal("run callback was not called")
+	}
+	if cfg.Network != network.Mainnet {
+		t.Errorf("Network = %q, want mainnet", cfg.Network)
+	}
+	if !cfg.MainnetAck {
+		t.Error("MainnetAck = false, want true")
+	}
+	if !strings.Contains(stderr, "MAINNET") {
+		t.Errorf("banner %q does not contain %q", stderr, "MAINNET")
+	}
+}
+
+// TestHoodiWithAckFlag verifies that --network hoodi --i-understand-this-is-mainnet
+// proceeds normally and the banner shows lowercase "hoodi" (not "HOODI").
+func TestHoodiWithAckFlag(t *testing.T) {
+	dir := t.TempDir()
+	args := []string{
+		"--validator-key-path", "/some/keystore.json",
+		"--pubkeys", "0x" + validPubkey,
+		"--network", "hoodi",
+		"--output-dir", dir,
+		"--i-understand-this-is-mainnet", // supplying the ack flag on hoodi is harmless
+	}
+	cfg, stderr, called, err := runApp(t, args)
+	if err != nil {
+		t.Fatalf("runApp hoodi with ack flag: %v", err)
+	}
+	if !called {
+		t.Fatal("run callback was not called")
+	}
+	if cfg.Network != network.Hoodi {
+		t.Errorf("Network = %q, want hoodi", cfg.Network)
+	}
+	if !strings.Contains(stderr, "network=hoodi") {
+		t.Errorf("banner %q does not contain %q", stderr, "network=hoodi")
+	}
+	if strings.Contains(stderr, "MAINNET") {
+		t.Errorf("banner %q unexpectedly contains MAINNET for hoodi network", stderr)
 	}
 }
