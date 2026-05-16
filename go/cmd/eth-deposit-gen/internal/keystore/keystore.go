@@ -109,13 +109,14 @@ func (l *loader) Load(_ context.Context, path string, pw PassphraseSource) (Key,
 		return Key{}, fmt.Errorf("%w: %s: %v", ErrKeystoreMalformed, path, err)
 	}
 
-	// Validate required fields exist at the JSON level.
-	if envelope.Crypto == nil {
-		return Key{}, fmt.Errorf("%w: %s: missing crypto field", ErrKeystoreMalformed, path)
-	}
-
+	// Version check first — gives the most diagnostic error for malformed v3 keystores.
 	if envelope.Version != 4 {
 		return Key{}, fmt.Errorf("%w: %s: got %d", ErrKeystoreVersion, path, envelope.Version)
+	}
+
+	// Validate the crypto field is present after confirming version.
+	if envelope.Crypto == nil {
+		return Key{}, fmt.Errorf("%w: %s: missing crypto field", ErrKeystoreMalformed, path)
 	}
 
 	// Source the passphrase.
@@ -124,11 +125,13 @@ func (l *loader) Load(_ context.Context, path string, pw PassphraseSource) (Key,
 		return Key{}, fmt.Errorf("passphrase source: %w", err)
 	}
 
-	// Decrypt. The wealdtech API takes a string. We convert from []byte, then
-	// zeroize the original slice. The string copy itself cannot be zeroed (Go
-	// strings are immutable), so it will persist until GC — this is unavoidable.
+	// Decrypt. The wealdtech API takes a string. We convert from []byte and
+	// defer zeroization of the original slice so it is always cleared,
+	// including on the decrypt-failure path. The string copy itself cannot be
+	// zeroed (Go strings are immutable); it will persist until GC — this is
+	// unavoidable with the current wealdtech API signature.
 	passString := string(passBytes)
-	zeroizeBytes(passBytes)
+	defer zeroizeBytes(passBytes)
 
 	enc := keystorev4.New()
 	secret, err := enc.Decrypt(envelope.Crypto, passString)

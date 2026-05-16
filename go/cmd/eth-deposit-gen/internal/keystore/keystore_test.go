@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
@@ -334,8 +334,8 @@ func TestLoad_PubkeyNormalized(t *testing.T) {
 		t.Fatalf("encrypt: %v", err)
 	}
 
-	// Write a keystore with a 0x-prefixed, uppercase pubkey.
-	uppercasePubkey := "0x" + fmt.Sprintf("%X", []byte(testPubkeyHex))
+	// A realistic pubkey: 0x-prefixed and uppercase, as some CLI tools emit.
+	uppercasePubkey := "0x" + strings.ToUpper(testPubkeyHex)
 
 	ks := keystoreJSON{
 		Crypto:  crypto,
@@ -354,15 +354,14 @@ func TestLoad_PubkeyNormalized(t *testing.T) {
 	}
 	defer key.Zeroize()
 
-	// The stored value is already hex-of-hex so just check normalization rules:
-	// no 0x prefix, all lowercase.
-	if len(key.PubkeyHex) > 0 && key.PubkeyHex[:2] == "0x" {
+	// Must be lowercase and without 0x prefix.
+	if strings.HasPrefix(key.PubkeyHex, "0x") {
 		t.Errorf("PubkeyHex has 0x prefix: %q", key.PubkeyHex)
 	}
-	for _, c := range key.PubkeyHex {
-		if c >= 'A' && c <= 'Z' {
-			t.Errorf("PubkeyHex contains uppercase: %q", key.PubkeyHex)
-			break
-		}
+	if key.PubkeyHex != strings.ToLower(key.PubkeyHex) {
+		t.Errorf("PubkeyHex is not fully lowercase: %q", key.PubkeyHex)
+	}
+	if key.PubkeyHex != testPubkeyHex {
+		t.Errorf("PubkeyHex = %q, want %q", key.PubkeyHex, testPubkeyHex)
 	}
 }
