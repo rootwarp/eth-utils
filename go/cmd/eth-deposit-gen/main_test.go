@@ -123,10 +123,11 @@ func makeTestDeps(summaryBuf *bytes.Buffer, writerOverride output.Writer) deps {
 		newSigner: func(_ []byte) (bls.Signer, error) {
 			return fakeSign, nil
 		},
-		verifier:   &fakeVerifier{ok: true},
-		writer:     w,
-		summaryOut: summaryBuf,
-		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		verifier:    &fakeVerifier{ok: true},
+		writer:      w,
+		summaryOut:  summaryBuf,
+		progressOut: io.Discard,
+		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		// verifyDepositCLI defaults to nil; tests that need it set it explicitly.
 		// When cfg.VerifyWithDepositCLI=false (the default in makeCfg()), it is never called.
 		verifyDepositCLI: nil,
@@ -613,8 +614,8 @@ func TestRunWithDeps_NoSecretInLogs(t *testing.T) {
 	// because key.Zeroize() will zero-out the Secret slice in-place, which would
 	// also zero our sentinel if we share the same backing array.
 	sentinelOrig := bytes.Repeat([]byte{0x5A}, 32) // "ZZZZ..." — distinctive non-zero pattern
-	wantHex := fmt.Sprintf("%x", sentinelOrig)      // "5a5a5a...5a" — pre-compute before zeroize
-	wantDec := fmt.Sprintf("%v", sentinelOrig)      // "[90 90 90 ...]" — pre-compute before zeroize
+	wantHex := fmt.Sprintf("%x", sentinelOrig)     // "5a5a5a...5a" — pre-compute before zeroize
+	wantDec := fmt.Sprintf("%v", sentinelOrig)     // "[90 90 90 ...]" — pre-compute before zeroize
 	wantRaw := make([]byte, len(sentinelOrig))
 	copy(wantRaw, sentinelOrig) // deep copy to survive zeroize
 
@@ -645,9 +646,10 @@ func TestRunWithDeps_NoSecretInLogs(t *testing.T) {
 		newSigner: func(_ []byte) (bls.Signer, error) {
 			return fakeSign, nil
 		},
-		verifier:   &fakeVerifier{ok: true},
-		writer:     &fakeWriter{path: "/out/deposit_data-1.json", sha256hex: "cafebabe"},
-		summaryOut: &summaryBuf,
+		verifier:    &fakeVerifier{ok: true},
+		writer:      &fakeWriter{path: "/out/deposit_data-1.json", sha256hex: "cafebabe"},
+		summaryOut:  &summaryBuf,
+		progressOut: io.Discard,
 		// Verbose text logger so all Debug lines are emitted to logBuf.
 		logger: slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}
@@ -917,14 +919,15 @@ func makeMultiPubkeyDeps(summaryBuf *bytes.Buffer, pks [][48]byte) deps {
 	}
 
 	return deps{
-		initBLS: func() error { return nil },
-		scanner: func(_ string) (keystore.DirectoryIndex, error) { return idx, nil },
-		loader: &funcLoader{fn: loaderFunc},
-		newSigner: newSignerFunc,
-		verifier:   &fakeVerifier{ok: true},
-		writer:     &fakeWriter{path: "/out/deposit_data-1.json", sha256hex: "cafebabe"},
-		summaryOut: summaryBuf,
-		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		initBLS:     func() error { return nil },
+		scanner:     func(_ string) (keystore.DirectoryIndex, error) { return idx, nil },
+		loader:      &funcLoader{fn: loaderFunc},
+		newSigner:   newSignerFunc,
+		verifier:    &fakeVerifier{ok: true},
+		writer:      &fakeWriter{path: "/out/deposit_data-1.json", sha256hex: "cafebabe"},
+		summaryOut:  summaryBuf,
+		progressOut: io.Discard,
+		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
 
@@ -1230,6 +1233,166 @@ func TestVerifyDepositCLI_DryRun_NeverCalled(t *testing.T) {
 	err := runWithDeps(context.Background(), cfg, d)
 	if err != nil {
 		t.Fatalf("runWithDeps(dry-run) unexpected error: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestProgress — Issue #19 progress indicator tests
+// ---------------------------------------------------------------------------
+
+// makeNPubkeyDeps builds deps for n distinct pubkeys, wiring progressOut to the
+// given writer. It is similar to makeMultiPubkeyDeps but accepts a custom
+// progressOut and a log buffer so the non-TTY slog path can be inspected.
+func makeNPubkeyDeps(n int, progressOut io.Writer, logBuf *bytes.Buffer) (deps, [][48]byte) {
+	pks := make([][48]byte, n)
+	for i := range pks {
+		pks[i][0] = byte(i + 1)
+	}
+	idx := make(keystore.DirectoryIndex, n)
+	signers := make(map[byte]*fakeSigner, n)
+	for i, pk := range pks {
+		pkHex := fmt.Sprintf("%x", pk[:])
+		idx[pkHex] = fmt.Sprintf("/fake/%d.json", i)
+		s := &fakeSigner{pubkey: pk}
+		s.sig[0] = pk[0]
+		signers[pk[0]] = s
+	}
+
+	loaderFn := func(_ context.Context, path string, _ keystore.PassphraseSource) (keystore.Key, error) {
+		var i int
+		fmt.Sscanf(path, "/fake/%d.json", &i)
+		pk := pks[i]
+		secret := make([]byte, 32)
+		secret[0] = pk[0]
+		return keystore.Key{Secret: secret, PubkeyHex: fmt.Sprintf("%x", pk[:])}, nil
+	}
+	newSignerFn := func(secret []byte) (bls.Signer, error) {
+		s, ok := signers[secret[0]]
+		if !ok {
+			return nil, fmt.Errorf("no signer for secret[0]=%d", secret[0])
+		}
+		return s, nil
+	}
+
+	var lg *slog.Logger
+	if logBuf != nil {
+		lg = slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	} else {
+		lg = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+
+	var summaryBuf bytes.Buffer
+	d := deps{
+		initBLS:          func() error { return nil },
+		scanner:          func(_ string) (keystore.DirectoryIndex, error) { return idx, nil },
+		loader:           &funcLoader{fn: loaderFn},
+		newSigner:        newSignerFn,
+		verifier:         &fakeVerifier{ok: true},
+		writer:           &fakeWriter{path: "/out/deposit_data-1.json", sha256hex: "cafebabe"},
+		summaryOut:       &summaryBuf,
+		logger:           lg,
+		progressOut:      progressOut,
+		verifyDepositCLI: nil,
+	}
+	return d, pks
+}
+
+// TestProgress_NonTTY_NoCarriageReturn verifies that when stderr is a non-TTY
+// (bytes.Buffer), no \r bytes are written to progressOut (AC #1, AC #5).
+// It also verifies that slog.Info events are emitted for 10% milestones and final (AC #2).
+func TestProgress_NonTTY_NoCarriageReturn(t *testing.T) {
+	var progressBuf bytes.Buffer
+	var logBuf bytes.Buffer
+
+	const n = 10 // >5, gives clean 10% intervals
+	d, pks := makeNPubkeyDeps(n, &progressBuf, &logBuf)
+
+	cfg := cli.Config{
+		KeystoreDir: "/fake/keystores",
+		Pubkeys:     pks,
+		Network:     network.Hoodi,
+		OutputDir:   "/tmp",
+		Parallel:    1,
+	}
+
+	if err := runWithDeps(context.Background(), cfg, d); err != nil {
+		t.Fatalf("runWithDeps() unexpected error: %v", err)
+	}
+
+	// AC #5: progressOut (non-TTY bytes.Buffer) must contain no \r bytes.
+	if bytes.Contains(progressBuf.Bytes(), []byte{'\r'}) {
+		t.Errorf("progressOut (non-TTY) contains \\r byte; got: %q", progressBuf.String())
+	}
+
+	// AC #2: logger must have received "signing progress" events.
+	// For n=10: milestones at 10%, 20%, ..., 100% → that's 10 events.
+	logOutput := logBuf.String()
+	count := strings.Count(logOutput, "signing progress")
+	if count == 0 {
+		t.Errorf("no 'signing progress' log events emitted for non-TTY path; log:\n%s", logOutput)
+	}
+}
+
+// TestProgress_Suppressed_WhenFiveOrFewer verifies that no progress output
+// (neither \r nor slog events) is emitted when len(Pubkeys) <= 5 (AC #4).
+func TestProgress_Suppressed_WhenFiveOrFewer(t *testing.T) {
+	var progressBuf bytes.Buffer
+	var logBuf bytes.Buffer
+
+	const n = 5 // exactly 5 — threshold; must be suppressed
+	d, pks := makeNPubkeyDeps(n, &progressBuf, &logBuf)
+
+	cfg := cli.Config{
+		KeystoreDir: "/fake/keystores",
+		Pubkeys:     pks,
+		Network:     network.Hoodi,
+		OutputDir:   "/tmp",
+		Parallel:    1,
+	}
+
+	if err := runWithDeps(context.Background(), cfg, d); err != nil {
+		t.Fatalf("runWithDeps() unexpected error: %v", err)
+	}
+
+	if len(progressBuf.Bytes()) > 0 {
+		t.Errorf("progressOut should be empty for n<=5; got %q", progressBuf.String())
+	}
+	if strings.Contains(logBuf.String(), "signing progress") {
+		t.Errorf("no 'signing progress' log events should be emitted for n<=5; log:\n%s", logBuf.String())
+	}
+}
+
+// TestProgress_JSONLogs_EmitsSlogNotCarriageReturn verifies that when JSONLogs=true,
+// progress is emitted as slog.Info events and progressOut gets no \r bytes (AC #3).
+func TestProgress_JSONLogs_EmitsSlogNotCarriageReturn(t *testing.T) {
+	var progressBuf bytes.Buffer
+	var logBuf bytes.Buffer
+
+	const n = 6 // >5
+	d, pks := makeNPubkeyDeps(n, &progressBuf, &logBuf)
+
+	cfg := cli.Config{
+		KeystoreDir: "/fake/keystores",
+		Pubkeys:     pks,
+		Network:     network.Hoodi,
+		OutputDir:   "/tmp",
+		Parallel:    1,
+		JSONLogs:    true,
+	}
+
+	if err := runWithDeps(context.Background(), cfg, d); err != nil {
+		t.Fatalf("runWithDeps() unexpected error: %v", err)
+	}
+
+	// progressOut must have no \r
+	if bytes.Contains(progressBuf.Bytes(), []byte{'\r'}) {
+		t.Errorf("progressOut (JSONLogs=true) contains \\r byte; got: %q", progressBuf.String())
+	}
+
+	// slog events must appear in the log output
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "signing progress") {
+		t.Errorf("no 'signing progress' events in log output (JSONLogs=true); log:\n%s", logOutput)
 	}
 }
 

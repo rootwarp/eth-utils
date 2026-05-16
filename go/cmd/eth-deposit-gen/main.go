@@ -16,6 +16,7 @@ import (
 	"time"
 
 	ucli "github.com/urfave/cli/v2"
+	"golang.org/x/term"
 
 	"github.com/rootwarp/eth-utils/go/internal/bls"
 	"github.com/rootwarp/eth-utils/go/internal/cli"
@@ -105,6 +106,12 @@ type deps struct {
 	// summaryOut is where the success summary line is written.
 	summaryOut io.Writer
 
+	// progressOut is where the per-pubkey progress indicator is written.
+	// In production this is os.Stderr; in tests use io.Discard or a bytes.Buffer.
+	// If the writer is a *os.File connected to a TTY, a single updating line
+	// (using \r) is emitted; otherwise slog.Info events are used (non-TTY / CI).
+	progressOut io.Writer
+
 	// logger receives structured debug messages. Set to a discarding logger to
 	// suppress all output; set to a text/JSON handler to enable debug logging.
 	logger *slog.Logger
@@ -157,6 +164,46 @@ func buildLogger(verbose, jsonLogs bool, w io.Writer) *slog.Logger {
 	return slog.New(h)
 }
 
+// isTTY reports whether w is an *os.File connected to a terminal.
+// Any other writer (bytes.Buffer, io.Discard, a pipe) returns false.
+func isTTY(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(int(f.Fd()))
+}
+
+// emitProgress writes a progress update for the signing loop.
+//
+// Behaviour:
+//   - Suppressed (caller responsibility) when len(cfg.Pubkeys) <= 5.
+//   - cfg.JSONLogs=true: always emits structured slog.Info events — same as
+//     non-TTY so log capture in CI is never corrupted by \r-overwrite.
+//   - progressOut is a TTY: overwrites the current line via \r; emits a final
+//     newline when done==total so the subsequent summary line starts cleanly.
+//   - progressOut is not a TTY (pipe, buffer, CI): emits one slog.Info event
+//     per 10% of progress and always on the last entry.
+func emitProgress(d deps, cfg cli.Config, done, total int) {
+	if cfg.JSONLogs {
+		d.logger.Info("signing progress", "done", done, "total", total)
+		return
+	}
+	if isTTY(d.progressOut) {
+		fmt.Fprintf(d.progressOut, "\rsigning: %d/%d", done, total)
+		if done == total {
+			fmt.Fprintln(d.progressOut) // newline so the summary line starts on a fresh line
+		}
+		return
+	}
+	// Non-TTY: emit at each new 10-percentile boundary and always on the last entry.
+	pct := done * 100 / total
+	prevPct := (done - 1) * 100 / total
+	if pct/10 > prevPct/10 || done == total {
+		d.logger.Info("signing progress", "done", done, "total", total)
+	}
+}
+
 // productionDeps returns the deps wired with all real implementations.
 // The logger field is intentionally set to a discarding logger here; run()
 // overrides it with the cfg-configured logger before calling runWithDeps.
@@ -169,6 +216,7 @@ func productionDeps() deps {
 		verifier:         bls.DefaultVerifier(),
 		writer:           output.NewFSWriter(),
 		summaryOut:       os.Stderr,
+		progressOut:      os.Stderr,
 		logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
 		verifyDepositCLI: runDepositCLIVerify,
 	}
@@ -320,6 +368,8 @@ func runWithDeps(ctx context.Context, cfg cli.Config, d deps) error {
 	// Collect results in an indexed slice to preserve input order.
 	entries := make([]deposit.Entry, len(cfg.Pubkeys))
 	var firstErr error
+	done := 0
+	n := len(cfg.Pubkeys)
 	for r := range results {
 		if r.err != nil {
 			// Prefer the first non-Canceled error so that the returned error
@@ -331,6 +381,10 @@ func runWithDeps(ctx context.Context, cfg cli.Config, d deps) error {
 			continue
 		}
 		entries[r.idx] = r.entry
+		done++
+		if n > 5 {
+			emitProgress(d, cfg, done, n)
+		}
 	}
 	if firstErr != nil {
 		return firstErr
