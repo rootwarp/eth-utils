@@ -40,9 +40,9 @@ fuzz:
 	$(GOFLAGS) go test -fuzz FuzzUint64Chunk -fuzztime 30s ./internal/ssz/
 	$(GOFLAGS) go test -fuzz FuzzParsePubkeys -fuzztime 30s ./internal/cli/
 
-## refresh-golden: regenerate testdata/hoodi/* fixtures from the fixed secret
+## refresh-golden: regenerate testdata/hoodi/* and testdata/mainnet/* fixtures from the fixed secret
 refresh-golden:
-	REFRESH_GOLDEN=1 $(GOFLAGS) go test -run TestRefreshHoodiGolden -v -timeout 120s ./test/e2e/
+	REFRESH_GOLDEN=1 $(GOFLAGS) go test -run 'TestRefreshHoodiGolden|TestRefreshMainnetGolden' -v -timeout 120s ./test/e2e/
 
 ## clean: remove build artifacts
 clean:
