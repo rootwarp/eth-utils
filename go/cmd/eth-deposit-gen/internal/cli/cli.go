@@ -13,6 +13,7 @@ import (
 
 	ucli "github.com/urfave/cli/v2"
 
+	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/bls"
 	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/network"
 )
 
@@ -111,19 +112,19 @@ OPTIONS:
 		// 1. Parse and validate --network
 		net, err := network.ParseFlag(c.String("network"))
 		if err != nil {
-			return ucli.Exit(fmt.Sprintf("--network: %v", err), 1)
+			return ucli.Exit(fmt.Sprintf("--network: %v", err), 2)
 		}
 
 		// 2. Parse and validate --pubkeys
 		pubkeys, err := parsePubkeys(c.String("pubkeys"))
 		if err != nil {
-			return ucli.Exit(fmt.Sprintf("--pubkeys: %v", err), 1)
+			return ucli.Exit(fmt.Sprintf("--pubkeys: %v", err), 2)
 		}
 
 		// 3. Validate --output-dir
 		outputDir := c.String("output-dir")
 		if err := validateOutputDir(outputDir); err != nil {
-			return ucli.Exit(fmt.Sprintf("--output-dir: %v", err), 1)
+			return ucli.Exit(fmt.Sprintf("--output-dir: %v", err), 2)
 		}
 
 		cfg := Config{
@@ -195,6 +196,12 @@ func parsePubkeys(s string) ([][48]byte, error) {
 
 		var arr [48]byte
 		copy(arr[:], b)
+
+		// Validate the bytes represent a valid compressed G1 point on BLS12-381.
+		if err := bls.ValidatePubkeyBytes(arr); err != nil {
+			return nil, fmt.Errorf("pubkey %q is not a valid BLS12-381 G1 point: %w", e, err)
+		}
+
 		result = append(result, arr)
 	}
 
@@ -229,6 +236,9 @@ func validateOutputDir(dir string) error {
 // Format: eth-deposit-gen: network=<net> first_pubkey=<hex> last_pubkey=<hex> count=<n>
 // Pubkeys are rendered as 0x-prefixed lowercase hex.
 func printBanner(w io.Writer, cfg Config) {
+	if len(cfg.Pubkeys) == 0 {
+		return
+	}
 	first := cfg.Pubkeys[0]
 	last := cfg.Pubkeys[len(cfg.Pubkeys)-1]
 	fmt.Fprintf(w, "eth-deposit-gen: network=%s first_pubkey=0x%x last_pubkey=0x%x count=%d\n",

@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,9 +12,54 @@ import (
 
 	ucli "github.com/urfave/cli/v2"
 
+	blspkg "github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/bls"
 	icli "github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/cli"
 	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/network"
 )
+
+// validPubkey and validPubkey2 hold real BLS12-381 G1 compressed points, initialised
+// in TestMain from known fixed secrets so they pass ValidatePubkeyBytes.
+var (
+	validPubkey  string
+	validPubkey2 string
+)
+
+func TestMain(m *testing.M) {
+	if err := blspkg.Init(); err != nil {
+		fmt.Fprintf(os.Stderr, "bls.Init: %v\n", err)
+		os.Exit(1)
+	}
+	// Derive pubkeys from two known fixed secrets.
+	secret1 := make([]byte, 32)
+	secret1[0] = 1
+	s1, err := blspkg.NewSigner(secret1)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bls.NewSigner(1): %v\n", err)
+		os.Exit(1)
+	}
+	pub1, err := s1.PublicKey()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "PublicKey(1): %v\n", err)
+		os.Exit(1)
+	}
+	validPubkey = fmt.Sprintf("%x", pub1[:])
+
+	secret2 := make([]byte, 32)
+	secret2[0] = 2
+	s2, err := blspkg.NewSigner(secret2)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bls.NewSigner(2): %v\n", err)
+		os.Exit(1)
+	}
+	pub2, err := s2.PublicKey()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "PublicKey(2): %v\n", err)
+		os.Exit(1)
+	}
+	validPubkey2 = fmt.Sprintf("%x", pub2[:])
+
+	os.Exit(m.Run())
+}
 
 // runApp is a helper that invokes the app with the given args and captures stderr.
 // It returns the Config received by the run callback (if called), stderr output, and any error.
@@ -41,11 +87,6 @@ func runApp(t *testing.T, args []string) (cfg icli.Config, stderr string, runCal
 	err = app.Run(fullArgs)
 	return capturedCfg, errBuf.String(), called, err
 }
-
-// validPubkey is a 96-hex-char (48-byte) pubkey used in tests.
-// 96 hex chars = 48 bytes, representing a BLS12-381 G1 compressed point.
-const validPubkey = "93247f2209abcacfe7b55561da7ae6c4f1df5d7f36a2f4f11e0f5f9d0aa2e7e8b9d0a1c2e3f4a5b6c7d8e9f0a1b2c3d4"
-const validPubkey2 = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8"
 
 // TestMissingRequiredFlags verifies that omitting each required flag returns an error.
 func TestMissingRequiredFlags(t *testing.T) {
@@ -418,9 +459,11 @@ func TestBannerFormat(t *testing.T) {
 		t.Fatalf("runApp: %v", err)
 	}
 
-	// Banner must have format: eth-deposit-gen: network=<net> first_pubkey=<hex> last_pubkey=<hex> count=<n>
-	if !strings.HasPrefix(stderr, "eth-deposit-gen:") {
-		t.Errorf("stderr banner does not start with 'eth-deposit-gen:': %q", stderr)
+	// Assert full banner structure: network, first/last pubkey (0x-prefixed hex), count.
+	want := fmt.Sprintf("eth-deposit-gen: network=hoodi first_pubkey=0x%s last_pubkey=0x%s count=2",
+		validPubkey, validPubkey2)
+	if !strings.Contains(stderr, want) {
+		t.Errorf("stderr banner = %q\nwant to contain %q", stderr, want)
 	}
 }
 
@@ -504,7 +547,7 @@ func TestErrorIsExitCoder(t *testing.T) {
 	if !ok {
 		t.Fatalf("error type %T is not ucli.ExitCoder", err)
 	}
-	if exitErr.ExitCode() != 1 {
-		t.Errorf("ExitCode = %d, want 1", exitErr.ExitCode())
+	if exitErr.ExitCode() != 2 {
+		t.Errorf("ExitCode = %d, want 2 (validation error per PRD)", exitErr.ExitCode())
 	}
 }

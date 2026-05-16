@@ -146,3 +146,16 @@ func (v *verifier) Verify(pub [48]byte, signingRoot [32]byte, sig [96]byte) (boo
 
 	return hSig.VerifyByte(&hPub, signingRoot[:]), nil
 }
+
+// ValidatePubkeyBytes checks that b is a valid compressed BLS12-381 G1 point.
+// Init must have been called (or will be called internally). Returns nil if valid.
+func ValidatePubkeyBytes(pub [48]byte) error {
+	if err := Init(); err != nil {
+		return fmt.Errorf("bls: not initialized: %w", err)
+	}
+	var hPub bls.PublicKey
+	if err := hPub.Deserialize(pub[:]); err != nil {
+		return fmt.Errorf("bls: invalid G1 point: %w", err)
+	}
+	return nil
+}
