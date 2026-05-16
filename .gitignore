@@ -4,6 +4,7 @@ dist/*
 
 # Go
 go/go.work.sum
+go/cmd/eth-deposit-gen/bin/
 *.exe
 *.exe~
 *.dll
