@@ -1401,10 +1401,15 @@ func TestProgress_JSONLogs_EmitsSlogNotCarriageReturn(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestVersionFlag(t *testing.T) {
-	// Override the global version var so the output is deterministic.
-	orig := version
+	// Override the global version var and VersionPrinter so the output is
+	// deterministic; restore both on exit to avoid test-order pollution.
+	origVersion := version
+	origPrinter := ucli.VersionPrinter
 	version = "test-version"
-	defer func() { version = orig }()
+	defer func() {
+		version = origVersion
+		ucli.VersionPrinter = origPrinter
+	}()
 
 	var buf bytes.Buffer
 	app := cli.NewApp(func(_ context.Context, _ cli.Config) error { return nil })

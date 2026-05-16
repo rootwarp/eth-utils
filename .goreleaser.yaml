@@ -1,21 +1,23 @@
 # .goreleaser.yaml — Release configuration for eth-deposit-gen
 #
-# CGO strategy: zig cc cross-compilation
-# ----------------------------------------
+# CGO strategy: native-runner matrix (CI), zig cc cross-compilation (local)
+# --------------------------------------------------------------------------
 # eth-deposit-gen depends on github.com/herumi/bls-eth-go-binary, which ships
 # prebuilt static archives (.a) for each target OS/arch inside the Go module
 # (bls/lib/{darwin,linux}/{amd64,arm64}/libbls384_256.a). CGO_ENABLED=1 is
 # therefore required; the binary cannot be built with pure Go.
 #
-# For LOCAL snapshot builds: zig cc is used as the cross-compiler, allowing
-# all four targets to be built on a single macOS host. Zig 0.16 ships
-# prebuilt musl-based toolchains; no pinning or zig-forge required.
+# CI release builds (#21) use a native-runner matrix: macos-latest builds
+# darwin targets and ubuntu-latest builds linux targets, each with the host
+# C compiler. Because herumi's .a archives are pre-compiled per OS/arch, the
+# C compiler only needs to link — no C source compilation. This avoids zig
+# version pinning and any musl-vs-glibc tradeoffs in CI.
 #
-# For CI RELEASE builds (#21): the release workflow uses a native-runner
-# matrix (macos-latest for darwin builds, ubuntu-latest for linux builds)
-# with the host C compiler. This avoids any zig dependency in CI and uses
-# the same native libc as the target OS. See docs/validation/release-strategy.md
-# for the full rationale.
+# For local snapshot builds: run `make snapshot` (repo root Makefile). It
+# sets CC_FOR_LINUX_AMD64 and CC_FOR_LINUX_ARM64 env vars before invoking
+# goreleaser. The linux build configs read those via ${CC_FOR_LINUX_*:-cc}
+# so goreleaser uses zig cc locally but falls back to "cc" (host compiler)
+# in CI where those vars are unset.
 #
 # Windows: excluded. herumi/bls-eth-go-binary ships a windows/amd64 .a but
 # there is no Windows CI runner configured and the operator use case is
@@ -31,7 +33,7 @@ before:
     - go mod verify
 
 builds:
-  # darwin builds — compiled natively on macOS runners in CI; locally with host cc.
+  # darwin builds — compiled natively on macOS runners in CI.
   - id: darwin
     main: ./cmd/eth-deposit-gen
     dir: go
@@ -51,7 +53,8 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
 
-  # linux builds — natively on ubuntu runners in CI; via zig cc locally.
+  # linux builds — natively on ubuntu runners in CI; via zig cc when
+  # CC_FOR_LINUX_AMD64/ARM64 env vars are set (local snapshot via `make snapshot`).
   - id: linux-amd64
     main: ./cmd/eth-deposit-gen
     dir: go
@@ -62,7 +65,7 @@ builds:
       - amd64
     env:
       - CGO_ENABLED=1
-      - CC=zig cc -target x86_64-linux-musl
+      - 'CC={{ if index .Env "CC_FOR_LINUX_AMD64" }}{{ .Env.CC_FOR_LINUX_AMD64 }}{{ else }}cc{{ end }}'
     flags:
       - -trimpath
     ldflags:
@@ -81,7 +84,7 @@ builds:
       - arm64
     env:
       - CGO_ENABLED=1
-      - CC=zig cc -target aarch64-linux-musl
+      - 'CC={{ if index .Env "CC_FOR_LINUX_ARM64" }}{{ .Env.CC_FOR_LINUX_ARM64 }}{{ else }}cc{{ end }}'
     flags:
       - -trimpath
     ldflags:
