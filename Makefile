@@ -23,7 +23,7 @@ lint:
 
 # Test
 test:
-	cd go && go test ./...
+	cd go && CGO_ENABLED=1 go test ./...
 	cd rust && cargo test --workspace
 	cd python && pytest
 
