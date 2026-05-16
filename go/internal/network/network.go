@@ -1,10 +1,8 @@
 // Package network is the source of truth for per-network compile-time constants
-// used in the deposit signing pipeline. Phase 1 enables Hoodi only; mainnet
-// is explicitly disabled and will be unlocked in Phase 2.
+// used in the deposit signing pipeline.
 package network
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -32,24 +30,22 @@ var DomainDeposit = [4]byte{0x03, 0x00, 0x00, 0x00}
 // signing — always 32 zero bytes per the consensus spec.
 var ZeroGenesisValidatorsRoot = [32]byte{}
 
-// ErrMainnetNotEnabled is returned by Lookup when the caller requests mainnet.
-// Mainnet support is planned for Phase 2.
-var ErrMainnetNotEnabled = errors.New("mainnet support enabled in Phase 2")
-
 // Lookup returns the Params for the given network.
-// It returns ErrMainnetNotEnabled for Mainnet and a descriptive error for
-// any unknown network.
+// It returns a descriptive error for any unknown network.
 func Lookup(n Network) (Params, error) {
 	switch n {
+	case Mainnet:
+		return Params{
+			Name:               Mainnet,
+			GenesisForkVersion: [4]byte{0x00, 0x00, 0x00, 0x00},
+		}, nil
 	case Hoodi:
 		return Params{
 			Name:               Hoodi,
 			GenesisForkVersion: [4]byte{0x10, 0x00, 0x09, 0x10},
 		}, nil
-	case Mainnet:
-		return Params{}, ErrMainnetNotEnabled
 	default:
-		return Params{}, fmt.Errorf("unknown network %q: only %q is currently supported (mainnet planned for Phase 2)", n, Hoodi)
+		return Params{}, fmt.Errorf("unknown network %q: must be %q or %q", n, Mainnet, Hoodi)
 	}
 }
 

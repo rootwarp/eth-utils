@@ -240,25 +240,6 @@ func TestRunWithDeps_WriterError_ExitCode1(t *testing.T) {
 	}
 }
 
-func TestRunWithDeps_NetworkLookup_MainnetNotEnabled(t *testing.T) {
-	var summaryBuf bytes.Buffer
-	d := makeTestDeps(&summaryBuf, nil)
-
-	cfg := makeCfg()
-	cfg.Network = network.Mainnet
-
-	err := runWithDeps(context.Background(), cfg, d)
-	if err == nil {
-		t.Fatal("runWithDeps() returned nil error, want ErrMainnetNotEnabled")
-	}
-	if !errors.Is(err, network.ErrMainnetNotEnabled) {
-		t.Errorf("error = %v, want ErrMainnetNotEnabled", err)
-	}
-	if code := exitCodeFor(err); code != 2 {
-		t.Errorf("exitCodeFor(ErrMainnetNotEnabled) = %d, want 2", code)
-	}
-}
-
 func TestRunWithDeps_ContextCanceled_ExitCode4(t *testing.T) {
 	var summaryBuf bytes.Buffer
 	d := makeTestDeps(&summaryBuf, nil)
@@ -316,7 +297,6 @@ func TestExitCodeFor_ErrorCodes(t *testing.T) {
 		{"ErrKeystoreVersion", keystore.ErrKeystoreVersion, 2},
 		{"ErrEnvVarEmpty", keystore.ErrEnvVarEmpty, 2},
 		{"ErrEnvVarEmpty wrapped", fmt.Errorf("passphrase source: %w", keystore.ErrEnvVarEmpty), 2},
-		{"ErrMainnetNotEnabled", network.ErrMainnetNotEnabled, 2},
 		{"ErrPubkeyMismatch", deposit.ErrPubkeyMismatch, 2},
 		{"ErrPubkeyMismatch wrapped", fmt.Errorf("wrap: %w", deposit.ErrPubkeyMismatch), 2},
 		{"ExitCoder code 2", exitCoder2, 2},

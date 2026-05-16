@@ -1,7 +1,6 @@
 package network_test
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/rootwarp/eth-utils/go/internal/network"
@@ -24,7 +23,22 @@ func TestConstants(t *testing.T) {
 	})
 }
 
-// TestLookupHoodi verifies Hoodi fork bytes byte-for-byte.
+// TestLookupMainnet verifies mainnet fork bytes byte-for-byte.
+func TestLookupMainnet(t *testing.T) {
+	params, err := network.Lookup(network.Mainnet)
+	if err != nil {
+		t.Fatalf("Lookup(Mainnet) unexpected error: %v", err)
+	}
+	want := [4]byte{0x00, 0x00, 0x00, 0x00}
+	if params.GenesisForkVersion != want {
+		t.Errorf("GenesisForkVersion = %v, want %v", params.GenesisForkVersion, want)
+	}
+	if params.Name != network.Mainnet {
+		t.Errorf("Name = %q, want %q", params.Name, network.Mainnet)
+	}
+}
+
+// TestLookup verifies Lookup for all supported networks and error cases.
 func TestLookup(t *testing.T) {
 	t.Run("Hoodi_fork_version", func(t *testing.T) {
 		params, err := network.Lookup(network.Hoodi)
@@ -40,25 +54,11 @@ func TestLookup(t *testing.T) {
 		}
 	})
 
-	t.Run("Mainnet_returns_ErrMainnetNotEnabled", func(t *testing.T) {
-		_, err := network.Lookup(network.Mainnet)
-		if err == nil {
-			t.Fatal("Lookup(Mainnet) error = nil, want ErrMainnetNotEnabled")
-		}
-		if !errors.Is(err, network.ErrMainnetNotEnabled) {
-			t.Errorf("Lookup(Mainnet) error = %v, want errors.Is(err, ErrMainnetNotEnabled)", err)
-		}
-	})
-
 	t.Run("Unknown_network_returns_descriptive_error", func(t *testing.T) {
 		unknown := network.Network("sepolia")
 		_, err := network.Lookup(unknown)
 		if err == nil {
 			t.Fatal("Lookup(unknown) error = nil, want error")
-		}
-		// Error must not be ErrMainnetNotEnabled
-		if errors.Is(err, network.ErrMainnetNotEnabled) {
-			t.Errorf("Lookup(unknown) error should not be ErrMainnetNotEnabled")
 		}
 	})
 }
