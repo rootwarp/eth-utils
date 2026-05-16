@@ -38,6 +38,11 @@ type Config struct {
 	// MainnetAck is true when the operator passed --i-understand-this-is-mainnet,
 	// explicitly acknowledging that mainnet deposit data has irreversible financial
 	// consequences. Required when Network == network.Mainnet.
+	//
+	// NOTE: this field may be true for non-mainnet networks if the flag was supplied.
+	// Always evaluate it in conjunction with Network == network.Mainnet. The mainnet
+	// safety gate is enforced at the CLI layer (before Config is built) and as a
+	// defense-in-depth check inside runWithDeps.
 	MainnetAck bool
 }
 
@@ -72,9 +77,10 @@ EXAMPLES:
      --pubkeys 0x93247f2209abcafd...,0xa1b2c3d4e5f6... \
      --output-dir ./out
 
-   # Mainnet, single pubkey
+   # Mainnet, single pubkey (requires explicit acknowledgement)
    eth-deposit-gen \
      --network mainnet \
+     --i-understand-this-is-mainnet \
      --validator-key-path ./bls-keystore.json \
      --pubkeys 0x93247f2209abcafd... \
      --output-dir ./out

@@ -568,7 +568,7 @@ func TestMainnetWithoutAck(t *testing.T) {
 		"--output-dir", dir,
 		// Intentionally omitting --i-understand-this-is-mainnet
 	}
-	_, _, called, err := runApp(t, args)
+	_, stderr, called, err := runApp(t, args)
 	if err == nil {
 		t.Fatal("runApp mainnet without ack: error = nil, want error")
 	}
@@ -585,6 +585,71 @@ func TestMainnetWithoutAck(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mainnet selected") {
 		t.Errorf("error message %q does not contain %q", err.Error(), "mainnet selected")
+	}
+	// Guard must fire before printBanner: no pubkey data should appear on stderr.
+	if strings.Contains(stderr, "first_pubkey=") {
+		t.Errorf("banner must not be emitted when ack is absent; stderr = %q", stderr)
+	}
+}
+
+// TestMainnetWithExplicitFalseAck verifies that --i-understand-this-is-mainnet=false
+// (the explicit boolean-false form) is equivalent to omitting the flag and still
+// triggers exit code 2. This locks in urfave/cli v2 last-value-wins semantics so
+// that a library upgrade cannot silently change the behaviour.
+func TestMainnetWithExplicitFalseAck(t *testing.T) {
+	dir := t.TempDir()
+	args := []string{
+		"--validator-key-path", "/fake/path",
+		"--pubkeys", "0x" + validPubkey,
+		"--network", "mainnet",
+		"--output-dir", dir,
+		"--i-understand-this-is-mainnet=false", // explicit negation — gate must still fire
+	}
+	_, stderr, called, err := runApp(t, args)
+	if err == nil {
+		t.Fatal("runApp mainnet with explicit false ack: error = nil, want error")
+	}
+	if called {
+		t.Fatal("run callback was invoked with ack=false, want it not called")
+	}
+	exitErr, ok := err.(ucli.ExitCoder)
+	if !ok {
+		t.Fatalf("error type %T is not ucli.ExitCoder", err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Errorf("ExitCode = %d, want 2", exitErr.ExitCode())
+	}
+	if strings.Contains(stderr, "first_pubkey=") {
+		t.Errorf("banner must not be emitted when ack is false; stderr = %q", stderr)
+	}
+}
+
+// TestMainnetAckRepeatedOverride verifies last-value-wins semantics for repeated
+// boolean flags. Providing the ack flag then immediately negating it must still
+// trigger exit code 2 (the final value of false governs the gate).
+func TestMainnetAckRepeatedOverride(t *testing.T) {
+	dir := t.TempDir()
+	args := []string{
+		"--validator-key-path", "/fake/path",
+		"--pubkeys", "0x" + validPubkey,
+		"--network", "mainnet",
+		"--output-dir", dir,
+		"--i-understand-this-is-mainnet",       // first: true
+		"--i-understand-this-is-mainnet=false", // second (last): false → gate fires
+	}
+	_, _, called, err := runApp(t, args)
+	if err == nil {
+		t.Fatal("runApp mainnet with ack overridden to false: error = nil, want error")
+	}
+	if called {
+		t.Fatal("run callback was invoked, want it not called when final ack value is false")
+	}
+	exitErr, ok := err.(ucli.ExitCoder)
+	if !ok {
+		t.Fatalf("error type %T is not ucli.ExitCoder", err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Errorf("ExitCode = %d, want 2", exitErr.ExitCode())
 	}
 }
 

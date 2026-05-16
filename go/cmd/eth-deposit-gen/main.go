@@ -30,6 +30,12 @@ const CLIVersion = "2.7.0"
 // herumi errors have no exported sentinel, so we wrap them with this.
 var errBLSInit = errors.New("bls init failed")
 
+// errMainnetAckRequired is returned by runWithDeps when cfg.Network is mainnet
+// but cfg.MainnetAck is false. The CLI gate in app.Action catches this first for
+// CLI callers; this sentinel protects non-CLI callers (integration tests, future
+// programmatic APIs) and maps to exit code 2.
+var errMainnetAckRequired = errors.New("mainnet requires explicit acknowledgement (set Config.MainnetAck = true)")
+
 // defaultWithdrawalCreds returns the 32-byte withdrawal credentials for v1.
 // Type 0x00 prefix = BLS withdrawal type. Per the architecture doc this is
 // acceptable for v1; a future --withdrawal-address flag will plug in here.
@@ -98,6 +104,14 @@ func runWithDeps(ctx context.Context, cfg cli.Config, d deps) error {
 	params, err := network.Lookup(cfg.Network)
 	if err != nil {
 		return err
+	}
+
+	// Defense-in-depth: re-verify the mainnet acknowledgement inside the pipeline
+	// so that non-CLI callers (integration tests, future programmatic APIs) cannot
+	// skip the safety gate by constructing a Config directly. The CLI app.Action
+	// fires first for CLI callers and returns before reaching this point.
+	if cfg.Network == network.Mainnet && !cfg.MainnetAck {
+		return errMainnetAckRequired
 	}
 
 	// Step 3: load and decrypt the keystore; zeroize immediately when done.
@@ -174,7 +188,8 @@ func exitCodeFor(err error) int {
 		errors.Is(err, keystore.ErrKeystoreMalformed) ||
 		errors.Is(err, keystore.ErrKeystoreVersion) ||
 		errors.Is(err, keystore.ErrEnvVarEmpty) ||
-		errors.Is(err, deposit.ErrPubkeyMismatch) {
+		errors.Is(err, deposit.ErrPubkeyMismatch) ||
+		errors.Is(err, errMainnetAckRequired) {
 		return 2
 	}
 	// CLI validation errors from urfave/cli (ExitCoder with code 2).
