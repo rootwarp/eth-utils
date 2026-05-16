@@ -115,7 +115,7 @@ func TestHoodiGoldenDeposit(t *testing.T) {
 		t.Fatalf("read pubkeys.txt: %v", err)
 	}
 	pubkeyLines := strings.Split(strings.TrimSpace(string(pubkeysRaw)), "\n")
-	if len(pubkeyLines) == 0 {
+	if len(pubkeyLines) == 1 && pubkeyLines[0] == "" {
 		t.Fatal("pubkeys.txt is empty")
 	}
 
