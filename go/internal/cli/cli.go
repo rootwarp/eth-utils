@@ -44,6 +44,11 @@ type Config struct {
 	// safety gate is enforced at the CLI layer (before Config is built) and as a
 	// defense-in-depth check inside runWithDeps.
 	MainnetAck bool
+
+	// DryRun is true when --dry-run is passed. When set, the tool writes JSON to
+	// stdout instead of creating a file on disk. The output-dir is validated but
+	// nothing is written there. The summary line and sha256 still print to stderr.
+	DryRun bool
 }
 
 // NewApp constructs and returns a configured *cli.App. The run callback receives
@@ -119,6 +124,10 @@ OPTIONS:
 			Name:  "i-understand-this-is-mainnet",
 			Usage: "Required when --network mainnet: acknowledges this produces REAL mainnet deposit data with irreversible financial consequences",
 		},
+		&ucli.BoolFlag{
+			Name:  "dry-run",
+			Usage: "Print the deposit JSON to stdout instead of writing a file to --output-dir; no file is created. The sha256 on stderr matches the bytes written to stdout.",
+		},
 	}
 
 	app.Action = func(c *ucli.Context) error {
@@ -163,6 +172,7 @@ OPTIONS:
 			OutputDir:     outputDir,
 			PassphraseEnv: c.String("passphrase-env"),
 			MainnetAck:    mainnetAck,
+			DryRun:        c.Bool("dry-run"),
 		}
 
 		// 5. Print confirmation banner to stderr before invoking run.

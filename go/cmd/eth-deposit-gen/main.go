@@ -58,6 +58,16 @@ func pickPassphraseSource(cfg cli.Config) keystore.PassphraseSource {
 	return keystore.NewTermPromptSource(os.Stderr)
 }
 
+// pickWriter returns the appropriate output.Writer based on cfg.
+// When cfg.DryRun is true, returns a DryRunWriter that writes JSON to w
+// (typically os.Stdout); otherwise returns an FSWriter that writes to disk.
+func pickWriter(cfg cli.Config, w io.Writer) output.Writer {
+	if cfg.DryRun {
+		return output.NewDryRunWriter(w)
+	}
+	return output.NewFSWriter()
+}
+
 // deps holds the injectable dependencies for runWithDeps. In production these
 // are filled with real implementations; in tests they can be replaced with fakes.
 type deps struct {
@@ -224,15 +234,25 @@ func runWithDeps(ctx context.Context, cfg cli.Config, d deps) error {
 }
 
 // run is the urfave/cli action function. It delegates to runWithDeps with
-// the production dependency set.
+// the production dependency set. When cfg.DryRun is true, the writer is
+// swapped for a DryRunWriter that prints JSON to stdout; productionDeps()
+// always starts with an FSWriter, and run() overrides it here.
 func run(ctx context.Context, cfg cli.Config) error {
-	return runWithDeps(ctx, cfg, productionDeps())
+	d := productionDeps()
+	d.writer = pickWriter(cfg, os.Stdout)
+	return runWithDeps(ctx, cfg, d)
 }
 
 // printSummary writes the success summary line to w.
 // Format: wrote <path> (sha256=<hex>, n=<count>, network=<name>)\n
+// When path is empty (DryRunWriter returns ""), the placeholder "<stdout>" is
+// used so the summary remains human-readable.
 func printSummary(w io.Writer, path, sha256hex string, n int, net network.Network) {
-	fmt.Fprintf(w, "wrote %s (sha256=%s, n=%d, network=%s)\n", path, sha256hex, n, net)
+	display := path
+	if display == "" {
+		display = "<stdout>"
+	}
+	fmt.Fprintf(w, "wrote %s (sha256=%s, n=%d, network=%s)\n", display, sha256hex, n, net)
 }
 
 // exitCodeFor maps errors to exit codes per the PRD:
