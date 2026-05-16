@@ -868,6 +868,143 @@ func TestJSONLogsFlag(t *testing.T) {
 	})
 }
 
+// TestParallelFlag verifies that --parallel is accepted, defaults to 1, is validated,
+// and is propagated correctly in Config.
+func TestParallelFlag(t *testing.T) {
+	dir := t.TempDir()
+	ksDir := t.TempDir()
+
+	t.Run("defaults_to_1", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if cfg.Parallel != 1 {
+			t.Errorf("Parallel = %d, want 1 (default)", cfg.Parallel)
+		}
+	})
+
+	t.Run("valid_N_propagates", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+			"--parallel", "4",
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if cfg.Parallel != 4 {
+			t.Errorf("Parallel = %d, want 4", cfg.Parallel)
+		}
+	})
+
+	t.Run("zero_rejected_exit2", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+			"--parallel", "0",
+		}
+		_, _, called, err := runApp(t, args)
+		if err == nil {
+			t.Fatal("runApp with --parallel 0: error = nil, want error")
+		}
+		if called {
+			t.Fatal("run callback was invoked, want it not called on validation error")
+		}
+		exitErr, ok := err.(ucli.ExitCoder)
+		if !ok {
+			t.Fatalf("error type %T is not ucli.ExitCoder", err)
+		}
+		if exitErr.ExitCode() != 2 {
+			t.Errorf("ExitCode = %d, want 2", exitErr.ExitCode())
+		}
+	})
+
+	t.Run("negative_rejected_exit2", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+			"--parallel", "-1",
+		}
+		_, _, called, err := runApp(t, args)
+		if err == nil {
+			t.Fatal("runApp with --parallel -1: error = nil, want error")
+		}
+		if called {
+			t.Fatal("run callback was invoked, want it not called on validation error")
+		}
+		exitErr, ok := err.(ucli.ExitCoder)
+		if !ok {
+			t.Fatalf("error type %T is not ucli.ExitCoder", err)
+		}
+		if exitErr.ExitCode() != 2 {
+			t.Errorf("ExitCode = %d, want 2", exitErr.ExitCode())
+		}
+	})
+
+	t.Run("too_large_rejected_exit2", func(t *testing.T) {
+		// N > runtime.NumCPU()*4 must be rejected.
+		// Use a very large number guaranteed to exceed any CPU count * 4.
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+			"--parallel", "99999",
+		}
+		_, _, called, err := runApp(t, args)
+		if err == nil {
+			t.Fatal("runApp with --parallel 99999: error = nil, want error")
+		}
+		if called {
+			t.Fatal("run callback was invoked, want it not called on validation error")
+		}
+		exitErr, ok := err.(ucli.ExitCoder)
+		if !ok {
+			t.Fatalf("error type %T is not ucli.ExitCoder", err)
+		}
+		if exitErr.ExitCode() != 2 {
+			t.Errorf("ExitCode = %d, want 2", exitErr.ExitCode())
+		}
+	})
+
+	t.Run("error_message_contains_parallel", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+			"--parallel", "0",
+		}
+		_, _, _, err := runApp(t, args)
+		if err == nil {
+			t.Fatal("runApp with --parallel 0: error = nil, want error")
+		}
+		if !strings.Contains(err.Error(), "--parallel") {
+			t.Errorf("error message %q does not mention --parallel", err.Error())
+		}
+	})
+}
+
 // TestKeystoreDirValidation verifies that --keystore-dir must point to an existing,
 // readable directory, matching AC3 of Issue #25.
 func TestKeystoreDirValidation(t *testing.T) {

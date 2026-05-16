@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -184,52 +185,117 @@ func runWithDeps(ctx context.Context, cfg cli.Config, d deps) error {
 		passphraseSource = "env:" + cfg.PassphraseEnv
 	}
 
-	var entries []deposit.Entry
-
-	// Step 4: for each requested pubkey, look up its keystore, decrypt, sign,
-	// generate one deposit entry, then zeroize immediately.
-	for _, pk := range cfg.Pubkeys {
-		pkHex := fmt.Sprintf("%x", pk[:])
-		log.Debug("deposit: processing pubkey", "pubkey", pkHex)
-
-		keystorePath, ok := index.Lookup(pkHex)
-		if !ok {
-			return fmt.Errorf("no keystore found for pubkey 0x%s in %s: %w",
-				pkHex, cfg.KeystoreDir, keystore.ErrKeystoreNotFound)
-		}
-		log.Debug("keystore: loading", "pubkey", pkHex, "path", keystorePath, "passphrase_source", passphraseSource)
-
-		key, err := d.loader.Load(ctx, keystorePath, pwSrc)
-		if err != nil {
-			log.Debug("keystore: load failed", "pubkey", pkHex, "error", err)
-			return err
-		}
-		// Log pubkey hex and secret byte length only — never the secret bytes themselves.
-		log.Debug("keystore: loaded", "pubkey", key.PubkeyHex, "secret_len", len(key.Secret))
-
-		signer, err := d.newSigner(key.Secret)
-		key.Zeroize() // zeroize immediately after signer is constructed, even on error path
-		if err != nil {
-			log.Debug("signer: construction failed", "pubkey", pkHex, "error", err)
-			return err
-		}
-		log.Debug("signer: ready", "pubkey", pkHex)
-
-		gen := deposit.NewGenerator(signer, d.verifier, params)
-		log.Debug("deposit: generating entry", "pubkey", pkHex, "network", cfg.Network)
-		e, err := gen.Generate(ctx, deposit.Request{
-			Network:               cfg.Network,
-			Pubkeys:               [][48]byte{pk},
-			WithdrawalCredentials: defaultWithdrawalCreds(),
-			AmountGwei:            32_000_000_000,
-			DepositCLIVersion:     CLIVersion,
-		})
-		if err != nil {
-			log.Debug("deposit: generation failed", "pubkey", pkHex, "error", err)
-			return err
-		}
-		entries = append(entries, e...)
+	// Step 4: process pubkeys concurrently using a bounded worker pool.
+	// The pool size defaults to 1 when cfg.Parallel == 0 (Config built outside CLI).
+	parallel := cfg.Parallel
+	if parallel < 1 {
+		parallel = 1
 	}
+
+	// workerResult carries the output (or error) from one pubkey processing unit.
+	type workerResult struct {
+		idx   int
+		entry deposit.Entry
+		err   error
+	}
+
+	// Create a cancellable child context so workers can signal each other on error.
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
+
+	// work is pre-filled with pubkey indices; workers drain it.
+	work := make(chan int, len(cfg.Pubkeys))
+	for i := range cfg.Pubkeys {
+		work <- i
+	}
+	close(work)
+
+	results := make(chan workerResult, len(cfg.Pubkeys))
+
+	var wg sync.WaitGroup
+	for w := 0; w < parallel; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range work {
+				pk := cfg.Pubkeys[i]
+				pkHex := fmt.Sprintf("%x", pk[:])
+				log.Debug("deposit: processing pubkey", "pubkey", pkHex)
+
+				keystorePath, ok := index.Lookup(pkHex)
+				if !ok {
+					results <- workerResult{idx: i, err: fmt.Errorf(
+						"no keystore found for pubkey 0x%s in %s: %w",
+						pkHex, cfg.KeystoreDir, keystore.ErrKeystoreNotFound)}
+					workerCancel()
+					continue
+				}
+				log.Debug("keystore: loading", "pubkey", pkHex, "path", keystorePath, "passphrase_source", passphraseSource)
+
+				key, err := d.loader.Load(workerCtx, keystorePath, pwSrc)
+				if err != nil {
+					log.Debug("keystore: load failed", "pubkey", pkHex, "error", err)
+					results <- workerResult{idx: i, err: err}
+					workerCancel()
+					continue
+				}
+				log.Debug("keystore: loaded", "pubkey", key.PubkeyHex, "secret_len", len(key.Secret))
+
+				signer, err := d.newSigner(key.Secret)
+				key.Zeroize() // zeroize immediately after signer is constructed, even on error path
+				if err != nil {
+					log.Debug("signer: construction failed", "pubkey", pkHex, "error", err)
+					results <- workerResult{idx: i, err: err}
+					workerCancel()
+					continue
+				}
+				log.Debug("signer: ready", "pubkey", pkHex)
+
+				gen := deposit.NewGenerator(signer, d.verifier, params)
+				log.Debug("deposit: generating entry", "pubkey", pkHex, "network", cfg.Network)
+				e, err := gen.Generate(workerCtx, deposit.Request{
+					Network:               cfg.Network,
+					Pubkeys:               [][48]byte{pk},
+					WithdrawalCredentials: defaultWithdrawalCreds(),
+					AmountGwei:            32_000_000_000,
+					DepositCLIVersion:     CLIVersion,
+				})
+				if err != nil {
+					log.Debug("deposit: generation failed", "pubkey", pkHex, "error", err)
+					results <- workerResult{idx: i, err: err}
+					workerCancel()
+					continue
+				}
+				results <- workerResult{idx: i, entry: e[0]}
+			}
+		}()
+	}
+
+	// Close results channel once all workers have finished.
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results in an indexed slice to preserve input order.
+	entries := make([]deposit.Entry, len(cfg.Pubkeys))
+	var firstErr error
+	for r := range results {
+		if r.err != nil {
+			// Prefer the first non-Canceled error so that the returned error
+			// reflects the root cause rather than the cascading cancellation.
+			if firstErr == nil || (errors.Is(firstErr, context.Canceled) && !errors.Is(r.err, context.Canceled)) {
+				firstErr = r.err
+			}
+			workerCancel()
+			continue
+		}
+		entries[r.idx] = r.entry
+	}
+	if firstErr != nil {
+		return firstErr
+	}
+
 	log.Debug("deposit: generation complete", "entry_count", len(entries))
 
 	// Step 5: write the deposit data JSON atomically.
