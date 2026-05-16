@@ -45,20 +45,24 @@ network constants, and self-verification at the boundary** over flexibility.
 ## System Context Diagram
 
 ```text
-                  ┌──────────────────────────────────────────────┐
-                  │                  eth-deposit-gen             │
-   operator ───▶  │                                              │  ───▶  deposit_data-<ts>.json
-   (TTY/CI)       │  flags ─▶ keystore ─▶ deposit.Generator ─▶ output│      (filesystem)
-                  │                          ▲                   │
-                  │                   ssz / bls / network        │
-                  └──────────────────────────────────────────────┘
-                                          │
-                                          ▼
-                                  EIP-2335 keystore
-                                  (filesystem, read-only)
+                  ┌──────────────────────────────────────────────────────┐
+                  │                   eth-deposit-gen                    │
+   operator ───▶  │                                                      │  ───▶  deposit_data-<ts>.json
+   (TTY/CI)       │  flags ─▶ keystore.ScanDir ─▶ (per pubkey):         │      (filesystem)
+                  │                │               load → signer         │
+                  │                │               deposit.Generator     │
+                  │                │               ─▶ output             │
+                  │                │          ▲                          │
+                  │                │   ssz / bls / network               │
+                  └──────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+                         EIP-2335 keystore dir
+                         (filesystem, read-only)
+                         one .json file per validator
 ```
 
-No network calls. No external services. Inputs: keystore file + flags.
+No network calls. No external services. Inputs: keystore directory + flags.
 Output: one JSON file. The deposit JSON is later consumed off-host by the
 Launchpad / deposit contract — out of scope for this tool.
 
@@ -97,7 +101,7 @@ any future pure-Go libraries under `go/pkg/`.
 | `cmd/eth-deposit-gen` (`main`)       | Flag parsing, wiring, exit codes                        | CLI surface                   | all below                | yes  |
 | `internal/cli`                       | `urfave/cli/v2` app + flag → typed `Config`             | flag schema, validation       | `network`                | env  |
 | `internal/network`                   | Compile-time network constants (mainnet, hoodi)       | `Network` enum, fork bytes    | —                        | no   |
-| `internal/keystore`                  | EIP-2335 load + decrypt + zeroize                       | `KeyLoader` iface, key bytes  | (wealdtech, x/term)      | yes  |
+| `internal/keystore`                  | EIP-2335 dir scan + per-file load + decrypt + zeroize   | `KeyLoader`, `DirectoryIndex` | (wealdtech, x/term)      | yes  |
 | `internal/bls`                       | herumi init, sign, verify, pubkey-from-secret           | `Signer`, `Verifier` ifaces   | (herumi)                 | no*  |
 | `internal/ssz`                       | Hand-rolled `hash_tree_root` for the 4 spec structs     | chunking + merkleize          | —                        | no   |
 | `internal/deposit`                   | Domain orchestration: build message, sign, self-verify  | `Generator`, `Entry`          | `ssz`, `bls`, `network`  | no   |
@@ -173,17 +177,28 @@ func ParseFlag(s string) (Network, error) // accepts "mainnet"|"hoodi", case-sen
 
 ### `internal/keystore`
 
-**Responsibility:** Load an EIP-2335 v4 keystore from disk, source the
-passphrase safely, decrypt, return the raw 32-byte BLS secret, and provide a
+**Responsibility:** Two-phase EIP-2335 directory interface: (1) scan a
+directory and index keystores by pubkey without decrypting, (2) load and
+decrypt a single keystore on demand, returning the raw BLS secret with a
 zeroize hook.
 
 **Interface:**
 
 ```go
+// DirectoryIndex maps lowercase-hex pubkey (no 0x) to the keystore file path.
+// Built by ScanDir; used by callers to look up which file to Load.
+type DirectoryIndex map[string]string
+
+// ScanDir scans dir for *.json files, reads the top-level "pubkey" field
+// from each (no decryption), and returns an index. Files that are not valid
+// EIP-2335 JSON or lack a "pubkey" field are silently skipped with a log
+// warning. Returns an error only if dir cannot be read at all.
+func ScanDir(dir string) (DirectoryIndex, error)
+
 type KeyLoader interface {
     // Load reads and decrypts the keystore at path, returning the raw 32-byte
     // BLS secret and the pubkey hex string declared in the keystore JSON.
-    // The returned slice MUST be zeroized by the caller via Zeroize.
+    // The returned Key MUST be zeroized by the caller via Zeroize.
     Load(ctx context.Context, path string, pw PassphraseSource) (Key, error)
 }
 
@@ -204,12 +219,30 @@ func NewEnvSource(varName string) PassphraseSource          // os.Getenv
 func NewTermPromptSource(w io.Writer) PassphraseSource      // x/term, prompt on w (stderr)
 ```
 
+**Orchestration contract (`runWithDeps`):**
+1. Call `ScanDir(cfg.KeystoreDir)` once → `DirectoryIndex`.
+2. For each pubkey in `cfg.Pubkeys`:
+   - Look up `index[pubkeyHex]`; fail with a clear error if not found.
+   - Call `loader.Load(ctx, filepath, pwSrc)` to decrypt.
+   - Build a `bls.Signer` from the decrypted secret.
+   - Call `deposit.Generator.Generate` with that signer and the single pubkey.
+   - Zeroize the key immediately after the signer is constructed.
+3. Collect all entries; write once via `output.Writer`.
+
+The passphrase source (env var or TTY prompt) is shared across all keystores
+in the directory. Operators are expected to encrypt all keystores in the
+directory with the same passphrase.
+
 **Failure modes:**
+- Directory not readable → error, exit code 2.
+- Requested pubkey not found in index → error, exit code 2.
 - File missing / not JSON / `version != 4` → typed error, exit code 2.
 - Wrong passphrase → checksum mismatch from wealdtech → exit code 3.
 - Empty / unset env var → exit code 2 (user error before signer ever runs).
 
 **Key decisions:**
+- Two-phase design (scan then load) avoids decrypting keystores the user
+  didn't ask for — important for large directories managed by HSM or vault.
 - Passphrase source is an interface so test code injects a `bytes` source
   and TTY isn't required in CI.
 - `Zeroize` is explicit — Go's GC does not clear key material.
@@ -434,11 +467,12 @@ final path. No half-written deposit files on operator disks.
 
 ```go
 type Config struct {
-    KeystorePath  string
+    KeystoreDir   string      // replaces KeystorePath; must be an existing directory
     Pubkeys       [][48]byte
     Network       network.Network
     OutputDir     string
     PassphraseEnv string // empty = use TTY prompt
+    MainnetAck    bool
 }
 
 func NewApp(run func(context.Context, Config) error) *cli.App
@@ -446,24 +480,27 @@ func NewApp(run func(context.Context, Config) error) *cli.App
 
 Flag schema is exactly:
 ```
---validator-key-path  (string, required)
---pubkeys             (string, required, comma-sep, validated as 48-byte hex)
---network             (string, required, one of {mainnet, hoodi})
---output-dir          (string, required, must exist & be writable)
---passphrase-env      (string, optional; empty triggers stdin prompt)
+--keystore-dir              (string, required) directory of EIP-2335 keystores
+--pubkeys                   (string, required, comma-sep, validated as 48-byte hex)
+--network                   (string, required, one of {mainnet, hoodi})
+--output-dir                (string, required, must exist & be writable)
+--passphrase-env            (string, optional; empty triggers stdin prompt)
+--i-understand-this-is-mainnet  (bool, required when --network mainnet)
 ```
+
+Validation of `--keystore-dir`: must exist, must be a directory, must be readable (`os.ReadDir` succeeds). Writability is not required — the directory is read-only from the tool's perspective.
 
 ---
 
 ### `cmd/eth-deposit-gen` (main)
 
-**Responsibility:** Compose everything. ~50 lines.
+**Responsibility:** Compose everything. ~80 lines after the directory-loading
+refactor.
 
 ```go
 func main() {
     app := cli.NewApp(run)
     if err := app.Run(os.Args); err != nil {
-        // exit code mapping per PRD: 2=validation, 3=signer, 4=user abort
         os.Exit(exitCodeFor(err))
     }
 }
@@ -472,24 +509,44 @@ func run(ctx context.Context, cfg cli.Config) error {
     if err := bls.Init(); err != nil { return err }
 
     params, _ := network.Lookup(cfg.Network)
+    if cfg.Network == network.Mainnet && !cfg.MainnetAck {
+        return errMainnetAckRequired
+    }
+
+    // Phase 1: scan the keystore directory — no decryption yet.
+    index, err := keystore.ScanDir(cfg.KeystoreDir)
+    if err != nil { return err }
 
     pwSrc := pickPassphraseSource(cfg) // env or TTY
-    key, err := keystore.NewLoader().Load(ctx, cfg.KeystorePath, pwSrc)
-    if err != nil { return err }
-    defer key.Zeroize()
+    verifier := bls.DefaultVerifier()
+    var entries []deposit.Entry
 
-    signer, err := bls.NewSigner(key.Secret)
-    if err != nil { return err }
+    // Phase 2: for each requested pubkey, load its keystore and generate one entry.
+    for _, pk := range cfg.Pubkeys {
+        pkHex := hex.EncodeToString(pk[:])
+        path, ok := index[pkHex]
+        if !ok {
+            return fmt.Errorf("no keystore found for pubkey 0x%s in %s", pkHex, cfg.KeystoreDir)
+        }
 
-    gen := deposit.NewGenerator(signer, bls.DefaultVerifier(), params)
-    entries, err := gen.Generate(ctx, deposit.Request{
-        Network:               cfg.Network,
-        Pubkeys:               cfg.Pubkeys,
-        WithdrawalCredentials: defaultWithdrawalCreds(), // P1 may make configurable
-        AmountGwei:            32_000_000_000,
-        DepositCLIVersion:     CLIVersion,
-    })
-    if err != nil { return err }
+        key, err := keystore.NewLoader().Load(ctx, path, pwSrc)
+        if err != nil { return err }
+
+        signer, err := bls.NewSigner(key.Secret)
+        key.Zeroize() // zeroize immediately after signer is constructed
+        if err != nil { return err }
+
+        gen := deposit.NewGenerator(signer, verifier, params)
+        e, err := gen.Generate(ctx, deposit.Request{
+            Network:               cfg.Network,
+            Pubkeys:               [][48]byte{pk},
+            WithdrawalCredentials: defaultWithdrawalCreds(),
+            AmountGwei:            32_000_000_000,
+            DepositCLIVersion:     CLIVersion,
+        })
+        if err != nil { return err }
+        entries = append(entries, e...)
+    }
 
     path, sum, err := output.NewFSWriter().Write(ctx, cfg.OutputDir, entries, time.Now())
     if err != nil { return err }
@@ -499,10 +556,10 @@ func run(ctx context.Context, cfg cli.Config) error {
 }
 ```
 
-Note: the v1 design hard-codes `withdrawal_credentials` per the PRD's
-"defaults applied uniformly" note. A future flag (e.g.
-`--withdrawal-address`) plugs into `defaultWithdrawalCreds()` without
-changing any internal package signature.
+Note: `deposit.Generator` interface is unchanged — it is called once per
+pubkey with a single-element `Pubkeys` slice. The v1 design hard-codes
+`withdrawal_credentials`; a future `--withdrawal-address` flag plugs into
+`defaultWithdrawalCreds()` without changing internal package signatures.
 
 ---
 

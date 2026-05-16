@@ -29,8 +29,8 @@ This tool fills that gap: take known pubkeys + a BLS signing key from a keystore
 - Clear separation between mainnet and testnet to prevent accidental mainnet submissions during testing.
 
 ## User Stories
-- As a solo staker, I want to point the CLI at my BLS keystore and a pubkey, and produce a Hoodi deposit JSON so I can practice the deposit flow before going to mainnet.
-- As a node operator, I want to pass a comma-separated list of pubkeys plus a keystore path and receive a single `deposit_data-<ts>.json` containing all entries.
+- As a solo staker, I want to point the CLI at my keystore directory and a pubkey, and produce a Hoodi deposit JSON so I can practice the deposit flow before going to mainnet.
+- As a node operator, I want to pass a comma-separated list of pubkeys plus a keystore directory and receive a single `deposit_data-<ts>.json` containing all entries, with each pubkey signed by its own matched keystore.
 - As a security engineer, I want the tool to refuse to run when network and withdrawal-credential prefixes are inconsistent, so I cannot accidentally generate a mainnet deposit while testing.
 - As an auditor, I want every produced entry to be re-verifiable offline against the BLS pubkey and deposit message, so I can independently confirm correctness before broadcasting.
 
@@ -38,12 +38,12 @@ This tool fills that gap: take known pubkeys + a BLS signing key from a keystore
 
 ### Must Have (P0)
 1. **CLI invocation** built on `github.com/urfave/cli/v2` with exactly the following flags:
-   - `--validator-key-path <path>` (required, string): path to a JSON keystore file containing the BLS signing key used to produce signatures.
-   - `--pubkeys <list>` (required, string): comma-separated list of BLS pubkeys (hex, 0x-prefixed) to generate deposit data for, e.g. `0xabc...,0xdef...`.
+   - `--keystore-dir <dir>` (required, string): path to a directory containing one EIP-2335 JSON keystore per validator. The app scans this directory at startup, reads the `pubkey` field from each `.json` file without decrypting, and builds an index. Only the keystores whose `pubkey` matches a requested pubkey are decrypted and used.
+   - `--pubkeys <list>` (required, string): comma-separated list of BLS pubkeys (hex, 0x-prefixed) to generate deposit data for, e.g. `0xabc...,0xdef...`. Must not be empty. Each pubkey must have a matching keystore in `--keystore-dir`.
    - `--network {mainnet,hoodi}` (required): selects the correct `fork_version`, `genesis_validators_root`, and `network_name` in the output.
    - `--output-dir <path>` (required): directory to write the resulting deposit JSON file into.
 2. **Pubkey parsing & validation**: split `--pubkeys` on `,`, trim whitespace, and validate each entry is a 48-byte BLS12-381 G1 point in compressed hex form.
-3. **Keystore loading**: read the JSON keystore at `--validator-key-path`, parse it, and extract the BLS signing key. Fail with a clear error if the file is missing, malformed, or the key cannot be loaded.
+3. **Keystore directory loading**: scan the directory at `--keystore-dir` for files matching `*.json`. For each file, read (without decrypting) the top-level `pubkey` field to build a `pubkey → filepath` index. For each requested pubkey, look up its keystore file in the index and fail with a clear error if no match is found. Decrypt each matched keystore independently using the configured passphrase source (env var or TTY prompt). Fail with a clear error if any keystore is missing, malformed, passphrase-wrong, or the pubkey in the decrypted key does not match.
 4. **Deposit message construction** per the consensus spec: build `DepositMessage`, compute `deposit_message_root`, build `DepositData` domain (`DOMAIN_DEPOSIT` + fork version + zero genesis validators root for deposits), and sign.
 5. **Signing**: produce a BLS signature over the signing root using the loaded key; verify the resulting signature against the supplied pubkey before writing output (refuse if mismatch). The loaded private key must correspond to the supplied pubkey — reject any entry where it does not.
 6. **Output file**: write `deposit_data-<unix_timestamp>.json` to `--output-dir`, containing a JSON array of entries with exactly the fields the Launchpad expects:
@@ -68,7 +68,7 @@ This tool fills that gap: take known pubkeys + a BLS signing key from a keystore
 - Signatures are always verified against the supplied pubkey before being written to the output file.
 - `fork_version` and `genesis_validators_root` for each network are hard-coded constants compiled in (not fetched from the network) to prevent supply-chain substitution.
 - Dependencies pinned via `go.mod` / `go.sum` with module checksum verification (`GOFLAGS=-mod=readonly`, vendored or verified against the public checksum database). BLS implementation comes from an audited Go library.
-- The private key must never be accepted as a CLI argument or any flag whose value lands in shell history; only a keystore *path* is accepted.
+- The private key must never be accepted as a CLI argument or any flag whose value lands in shell history; only a keystore *directory path* is accepted.
 
 ### Compatibility
 - Output JSON must validate against the schema used by `ethereum/staking-deposit-cli` v2.x and the Launchpad uploader for both mainnet and Hoodi.
@@ -93,7 +93,7 @@ This tool fills that gap: take known pubkeys + a BLS signing key from a keystore
 - **CLI framework:** `github.com/urfave/cli/v2`.
 - **BLS library:** `github.com/herumi/bls-eth-go-binary` (Eth2-flavored BLS, widely used by Prysm), or alternatively `github.com/prysmaticlabs/prysm/v5/crypto/bls` which wraps it. Both are battle-tested in production beacon clients.
 - **SSZ / hashing:** `github.com/prysmaticlabs/fastssz` (or the Prysm-vendored equivalent) for `HashTreeRoot` of `DepositMessage` and `DepositData`. Must match consensus-specs exactly.
-- **Keystore parsing:** EIP-2335 JSON keystore decoder — e.g., `github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4` or equivalent. The keystore decryption passphrase, if required by the file's `crypto` section, will be sourced from a secure prompt or env var as an implementation detail (the *path* is the only public CLI surface).
+- **Keystore directory scanning and loading:** `internal/keystore` exposes a two-phase API. Phase 1 — `ScanDir(dir)` reads all `*.json` files, parses only the top-level `pubkey` field (no crypto), and returns a `DirectoryIndex` mapping each pubkey hex to its file path. Phase 2 — `Load(ctx, path, pw)` decrypts a single keystore; the caller invokes this once per requested pubkey. `github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4` handles the EIP-2335 crypto. The passphrase is sourced from a secure prompt or env var; the *directory path* is the only public CLI surface.
 - **Network constants** (compile-time):
   - Mainnet `GENESIS_FORK_VERSION = 0x00000000`, deposit `genesis_validators_root = 0x00..00` (per spec, deposit domain uses zero root).
   - Hoodi `GENESIS_FORK_VERSION = 0x10000910`.
@@ -105,22 +105,31 @@ This tool fills that gap: take known pubkeys + a BLS signing key from a keystore
 Example invocations:
 
 ```bash
-# Hoodi, two pubkeys
+# Hoodi, two pubkeys — keystores in ./keystores/
 eth-deposit-gen \
   --network hoodi \
-  --validator-key-path ./bls-keystore.json \
+  --keystore-dir ./keystores \
   --pubkeys 0x93247f2209abcafd...,0xa1b2c3d4e5f6... \
   --output-dir ./out
 
 # Mainnet, single pubkey
 eth-deposit-gen \
   --network mainnet \
-  --validator-key-path ./bls-keystore.json \
+  --i-understand-this-is-mainnet \
+  --keystore-dir ./keystores \
   --pubkeys 0x93247f2209abcafd... \
   --output-dir ./out
 ```
 
-The keystore file at `--validator-key-path` is a standard EIP-2335 JSON keystore, e.g.:
+`--keystore-dir` points to a directory of standard EIP-2335 JSON keystores, one per validator:
+
+```
+./keystores/
+├── keystore-0x93247f2209abcafd....json   # pubkey field: "93247f2209abcafd..."
+└── keystore-0xa1b2c3d4e5f6....json       # pubkey field: "a1b2c3d4e5f6..."
+```
+
+Each file is a standard EIP-2335 v4 keystore:
 ```json
 {
   "crypto": { "...": "..." },
@@ -130,6 +139,8 @@ The keystore file at `--validator-key-path` is a standard EIP-2335 JSON keystore
   "version": 4
 }
 ```
+
+File names are not significant — the tool identifies keystores by the `pubkey` field.
 
 ## Out of Scope
 - Generating new BLS keys or mnemonics (use `staking-deposit-cli` for that).

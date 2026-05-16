@@ -220,15 +220,26 @@ submitted on-chain to validate real-world acceptance.
 
 ## Phase 3 — M3: P1 polish
 
-**Goal:** Make the tool pleasant and safe for batch operators — parallel
-signing, dry-run, structured logging, optional cross-check with the official
-CLI.
+**Goal:** Make the tool pleasant and safe for batch operators — directory-based
+keystore loading for multi-validator fleets, parallel signing, dry-run,
+structured logging, optional cross-check with the official CLI.
 
-**Duration estimate:** Medium — **3–4 dev-days**.
+**Duration estimate:** Medium — **4.5–6 dev-days** (increased by task 3.0).
 
 **Depends on:** Phase 2 complete (correctness story locked in).
 
 ### Tasks
+
+- [ ] **3.0 — `--keystore-dir`: directory-based keystore loading** *(medium, 1.5d)*
+  - Add `keystore.ScanDir(dir)` → `DirectoryIndex` (pubkey hex → filepath,
+    no decryption).
+  - Replace `--validator-key-path` with `--keystore-dir` (directory required).
+  - `Config.KeystorePath` → `Config.KeystoreDir`; validate as readable dir.
+  - `runWithDeps`: scan once, then loop per pubkey — look up keystore path in
+    index, load+decrypt, sign, zeroize, collect entry.
+  - New sentinel `ErrKeystoreNotFound` (exit code 2).
+  - Update all unit tests, golden tests, and testdata layout.
+  - Dependencies: 1.5, 1.8, 1.9. Complexity: medium. **MUST LAND FIRST in Phase 3.**
 
 - [ ] **3.1 — Parallel signing worker pool** *(medium, 1–1.5d)*
   - Add `--parallel N` flag (default = `runtime.NumCPU()` or 1 for

@@ -3,9 +3,78 @@
 Sprint-ready issues for Phase 3 of `eth-deposit-gen`. Phase 3 layers
 operator-quality-of-life P1 features (parallelism, dry-run, logging,
 optional cross-check, progress indicator) on top of the already-correct
-Phase-2 core. Issues 15–19 map 1:1 to project-plan.md tasks 3.1–3.5.
+Phase-2 core. **Issue #25 must land first** — it replaces `--validator-key-path`
+with `--keystore-dir` and refactors `internal/keystore` to support directory
+scanning. Issues 15–19 map 1:1 to project-plan.md tasks 3.1–3.5; Issue #25
+maps to task 3.0.
 
 Story-point legend: **1 = 0.5d · 2 = 1d · 3 = 1.5d · 5 = 2d**.
+
+---
+
+## Issue #25 — `--keystore-dir`: directory-based keystore loading
+
+**Story points:** 3
+**Labels:** `core`, `cli`, `phase-3`
+
+### Description
+
+Replace `--validator-key-path <file>` (a single EIP-2335 keystore) with
+`--keystore-dir <dir>` (a directory of keystores, one per validator). The
+app scans the directory at startup — reading only the `pubkey` field from
+each `.json` file, without decrypting — to build a `pubkey → filepath`
+index. For each pubkey in `--pubkeys`, it looks up the keystore file,
+decrypts it using the shared passphrase source, signs, and zeroizes. This
+allows operators to manage a single keystore directory for a fleet of
+validators and generate deposit data for any subset by name.
+
+### Acceptance criteria
+
+- [ ] `internal/keystore` gains `ScanDir(dir string) (DirectoryIndex, error)`:
+  - Reads all `*.json` files in `dir` using `os.ReadDir`.
+  - Parses only the top-level `"pubkey"` JSON field from each file (no
+    decryption, no wealdtech call).
+  - Returns `DirectoryIndex` (`map[string]string`, pubkey hex → filepath).
+  - Silently skips files that lack a `"pubkey"` field or are not valid JSON
+    (with a `slog.Debug` log line per skipped file).
+  - Returns a non-nil error only if `dir` cannot be listed at all.
+- [ ] `DirectoryIndex` exposes a `Lookup(pubkeyHex string) (path string, ok bool)`
+  helper so callers never manipulate the map directly.
+- [ ] `internal/cli`:
+  - `--validator-key-path` is **removed**; `--keystore-dir` (string,
+    required) is added in its place.
+  - `Config.KeystorePath` is replaced by `Config.KeystoreDir string`.
+  - Validation: `--keystore-dir` must point to an existing, readable
+    directory. The probe uses `os.ReadDir`; a non-directory path or
+    permission error returns exit code 2.
+- [ ] `cmd/eth-deposit-gen` (`runWithDeps`):
+  - Calls `keystore.ScanDir(cfg.KeystoreDir)` once, before the per-pubkey
+    loop.
+  - For each pubkey in `cfg.Pubkeys`:
+    1. `index.Lookup(pubkeyHex)` — fail with a clear error and exit code 2
+       if not found: `"no keystore found for pubkey 0x<hex> in <dir>"`.
+    2. `loader.Load(ctx, filepath, pwSrc)` — existing error handling applies.
+    3. `bls.NewSigner(key.Secret)` — then `key.Zeroize()` immediately.
+    4. `deposit.NewGenerator(signer, verifier, params).Generate(ctx, req)`
+       with a single-element `Pubkeys` slice.
+  - Collects all entries; writes once at the end via `output.Writer`.
+- [ ] `deps` struct gains `scanner func(string) (keystore.DirectoryIndex, error)`
+  for test injection (fakes avoid real filesystem in unit tests).
+- [ ] A new sentinel `ErrKeystoreNotFound` is added to `internal/keystore`
+  and maps to exit code 2 in `exitCodeFor`.
+- [ ] All existing unit tests (`TestRunWithDeps_*`) updated to reflect new
+  `deps` and `Config` shape.
+- [ ] A new table-driven test `TestScanDir` covers: empty dir, dir with one
+  matching keystore, dir with mixed valid/invalid JSON, pubkey not found.
+- [ ] Golden tests (#10 Hoodi, #12 mainnet) updated: `testdata/hoodi/` and
+  `testdata/mainnet/` are restructured so the keystore lives in a
+  `keystores/` subdirectory; tests pass `--keystore-dir` instead of
+  `--validator-key-path`.
+- [ ] Help text (`--help`) shows the new flag with a usage example referencing
+  a directory path.
+
+### Dependencies
+#5, #8, #9.
 
 ---
 

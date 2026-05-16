@@ -23,10 +23,11 @@ sequence that gates v1.0 release.
 | 12 ★ | 2 | Mainnet golden-file fixture and integration test (M2 exit gate) | 2 | test | 11, 10 |
 | 13 | 2 | On-chain Hoodi deposit validation | 2 | test, infra | 11 |
 | 14 | 2 | Network safety banner hardening for mainnet | 1 | cli | 11, 8 |
-| 15 | 3 | Parallel signing worker pool | 3 | core, crypto | 6 |
-| 16 | 3 | `--dry-run` mode | 1 | cli | 7, 8 |
-| 17 | 3 | Structured logging with `log/slog` | 2 | cli, infra | 9 |
-| 18 | 3 | `--verify-with-deposit-cli` cross-check | 2 | cli, test | 9 |
+| 25 ★ | 3 | `--keystore-dir`: directory-based keystore loading | 3 | core, cli | 5, 8, 9 |
+| 15 | 3 | Parallel signing worker pool | 3 | core, crypto | 6, 25 |
+| 16 | 3 | `--dry-run` mode | 1 | cli | 7, 25 |
+| 17 | 3 | Structured logging with `log/slog` | 2 | cli, infra | 9, 25 |
+| 18 | 3 | `--verify-with-deposit-cli` cross-check | 2 | cli, test | 9, 25 |
 | 19 | 3 | Progress indicator for >5 entries | 1 | cli | 6, 17 |
 | 20 | 4 | GoReleaser configuration | 2 | infra | Phase 3 |
 | 21 | 4 | Release CI pipeline | 2 | infra | 20 |
@@ -42,9 +43,9 @@ sequence that gates v1.0 release.
 |-------|--------|--------------|------------------|
 | Phase 1 — M1 Core (Hoodi) | #1–#10 | **29** | ~14.5d (matches project-plan 8–11d once parallelizable streams overlap) |
 | Phase 2 — M2 Mainnet | #11–#14 | **6** | ~3d |
-| Phase 3 — M3 P1 polish | #15–#19 | **9** | ~4.5d |
+| Phase 3 — M3 P1 polish | #25, #15–#19 | **12** | ~6d |
 | Phase 4 — M4 Release | #20–#24 | **9** | ~4.5d |
-| **Total** | **24 issues** | **53 points** | **~26.5 dev-days serial** |
+| **Total** | **25 issues** | **56 points** | **~28 dev-days serial** |
 
 The serial-day total is intentionally higher than the project-plan's 16–22
 dev-day estimate because that estimate assumes the Phase-1 parallel work
@@ -99,14 +100,14 @@ are mutually independent and can be parallelized.
 | Label | Issues |
 |-------|--------|
 | `infra` | 1, 13, 20, 21, 24 |
-| `core` | 2, 3, 4, 5, 6, 7, 11, 15 |
+| `core` | 2, 3, 4, 5, 6, 7, 11, 15, 25 |
 | `crypto` | 3, 4, 5, 6, 15, 23 |
-| `cli` | 7, 8, 9, 14, 16, 17, 18, 19, 22 |
+| `cli` | 7, 8, 9, 14, 16, 17, 18, 19, 22, 25 |
 | `test` | 10, 12, 13, 18 |
 | `docs` | 22 |
 | `security` | 23 |
 | `phase-1` | 1–10 |
 | `phase-2` | 11–14 |
-| `phase-3` | 15–19 |
+| `phase-3` | 15–19, 25 |
 | `phase-4` | 20–24 |
-| `critical-path` | 3, 4, 6, 10, 12 |
+| `critical-path` | 3, 4, 6, 10, 12, 25 |
