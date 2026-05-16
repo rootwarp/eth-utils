@@ -65,7 +65,7 @@ const mainnetTestdataDir = "../../testdata/mainnet"
 func TestMainnetGoldenDeposit(t *testing.T) {
 	// --- Load fixtures from testdata/mainnet/ ---
 
-	keystorePath := mainnetTestdataDir + "/keystore.json"
+	keystorePath := mainnetTestdataDir + "/keystores/keystore.json"
 	passphrasePath := mainnetTestdataDir + "/passphrase.txt"
 	pubkeysPath := mainnetTestdataDir + "/pubkeys.txt"
 	expectedPath := mainnetTestdataDir + "/deposit_data-expected.json"
@@ -219,7 +219,7 @@ func TestMainnetBanner(t *testing.T) {
 		runCalled = true
 		return nil
 	})
-	app.Writer = io.Discard  // suppress urfave help-text noise
+	app.Writer = io.Discard // suppress urfave help-text noise
 	app.ErrWriter = &bannerBuf
 	app.ExitErrHandler = func(_ *ucli.Context, _ error) {} // prevent os.Exit in tests
 
@@ -227,7 +227,7 @@ func TestMainnetBanner(t *testing.T) {
 		"eth-deposit-gen",
 		"--network", "mainnet",
 		"--i-understand-this-is-mainnet",
-		"--validator-key-path", mainnetTestdataDir + "/keystore.json",
+		"--keystore-dir", mainnetTestdataDir + "/keystores",
 		"--pubkeys", pubkeyHex,
 		"--output-dir", t.TempDir(),
 	}
@@ -327,12 +327,12 @@ func refreshMainnetGoldenFixtures(t *testing.T) error {
 	}
 
 	// Write all files.
-	if err := os.MkdirAll(mainnetTestdataDir, 0o750); err != nil {
-		return fmt.Errorf("mkdir testdata/mainnet: %w", err)
+	if err := os.MkdirAll(mainnetTestdataDir+"/keystores", 0o750); err != nil {
+		return fmt.Errorf("mkdir testdata/mainnet/keystores: %w", err)
 	}
 
 	files := map[string][]byte{
-		mainnetTestdataDir + "/keystore.json":              keystoreBytes,
+		mainnetTestdataDir + "/keystores/keystore.json":    keystoreBytes,
 		mainnetTestdataDir + "/passphrase.txt":             []byte(goldenPassphrase),
 		mainnetTestdataDir + "/pubkeys.txt":                []byte(pubHex),
 		mainnetTestdataDir + "/deposit_data-expected.json": depositBuf.Bytes(),

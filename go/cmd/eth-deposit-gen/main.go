@@ -64,6 +64,10 @@ type deps struct {
 	// initBLS initialises the herumi BLS library. In tests a no-op can be used.
 	initBLS func() error
 
+	// scanner scans a keystore directory and returns a pubkey→path index.
+	// It is called once before the per-pubkey loop; no decryption occurs here.
+	scanner func(string) (keystore.DirectoryIndex, error)
+
 	// loader is used to load and decrypt the keystore.
 	loader keystore.KeyLoader
 
@@ -96,6 +100,7 @@ func productionDeps() deps {
 	}
 	return deps{
 		initBLS:    bls.Init,
+		scanner:    keystore.ScanDir,
 		loader:     keystore.NewLoader(),
 		newSigner:  bls.NewSigner,
 		verifier:   bls.DefaultVerifier(),
@@ -107,7 +112,7 @@ func productionDeps() deps {
 
 // runWithDeps is the testable core of run. It accepts a deps struct so tests
 // can inject fakes without touching the real BLS or keystore implementations.
-// It follows the exact wiring order prescribed by Issue #9 AC 3.
+// It follows the exact wiring order prescribed by Issue #25.
 func runWithDeps(ctx context.Context, cfg cli.Config, d deps) error {
 	log := d.logger
 
@@ -141,58 +146,70 @@ func runWithDeps(ctx context.Context, cfg cli.Config, d deps) error {
 		log.Debug("mainnet: explicit ack verified")
 	}
 
-	// Step 3: load and decrypt the keystore; zeroize immediately when done.
+	// Step 3: scan the keystore directory — no decryption yet.
+	log.Debug("keystore: scanning directory", "dir", cfg.KeystoreDir)
+	index, err := d.scanner(cfg.KeystoreDir)
+	if err != nil {
+		log.Debug("keystore: scan failed", "error", err)
+		return err
+	}
+	log.Debug("keystore: directory scanned", "count", len(index))
+
+	pwSrc := pickPassphraseSource(cfg)
 	passphraseSource := "tty"
 	if cfg.PassphraseEnv != "" {
 		passphraseSource = "env:" + cfg.PassphraseEnv
 	}
-	log.Debug("keystore: loading", "path", cfg.KeystorePath, "passphrase_source", passphraseSource)
-	pwSrc := pickPassphraseSource(cfg)
-	key, err := d.loader.Load(ctx, cfg.KeystorePath, pwSrc)
-	if err != nil {
-		log.Debug("keystore: load failed", "error", err)
-		return err
-	}
-	defer func() {
-		log.Debug("keystore: zeroizing secret material")
-		key.Zeroize()
-	}()
-	// Log pubkey hex and secret byte length only — never the secret bytes themselves.
-	log.Debug("keystore: loaded", "pubkey", key.PubkeyHex, "secret_len", len(key.Secret))
 
-	// Step 4: construct the BLS signer from the decrypted secret.
-	log.Debug("signer: constructing BLS signer")
-	signer, err := d.newSigner(key.Secret)
-	if err != nil {
-		log.Debug("signer: construction failed", "error", err)
-		return err
-	}
-	log.Debug("signer: ready")
+	var entries []deposit.Entry
 
-	// Step 5: build the deposit generator.
-	log.Debug("deposit: constructing generator", "network", params.Name)
-	gen := deposit.NewGenerator(signer, d.verifier, params)
+	// Step 4: for each requested pubkey, look up its keystore, decrypt, sign,
+	// generate one deposit entry, then zeroize immediately.
+	for _, pk := range cfg.Pubkeys {
+		pkHex := fmt.Sprintf("%x", pk[:])
+		log.Debug("deposit: processing pubkey", "pubkey", pkHex)
 
-	// Step 6: run the signing pipeline for all requested pubkeys.
-	log.Debug("deposit: generating",
-		"pubkey_count", len(cfg.Pubkeys),
-		"amount_gwei", 32_000_000_000,
-		"network", cfg.Network,
-		"deposit_cli_version", CLIVersion)
-	entries, err := gen.Generate(ctx, deposit.Request{
-		Network:               cfg.Network,
-		Pubkeys:               cfg.Pubkeys,
-		WithdrawalCredentials: defaultWithdrawalCreds(),
-		AmountGwei:            32_000_000_000,
-		DepositCLIVersion:     CLIVersion,
-	})
-	if err != nil {
-		log.Debug("deposit: generation failed", "error", err)
-		return err
+		keystorePath, ok := index.Lookup(pkHex)
+		if !ok {
+			return fmt.Errorf("no keystore found for pubkey 0x%s in %s: %w",
+				pkHex, cfg.KeystoreDir, keystore.ErrKeystoreNotFound)
+		}
+		log.Debug("keystore: loading", "pubkey", pkHex, "path", keystorePath, "passphrase_source", passphraseSource)
+
+		key, err := d.loader.Load(ctx, keystorePath, pwSrc)
+		if err != nil {
+			log.Debug("keystore: load failed", "pubkey", pkHex, "error", err)
+			return err
+		}
+		// Log pubkey hex and secret byte length only — never the secret bytes themselves.
+		log.Debug("keystore: loaded", "pubkey", key.PubkeyHex, "secret_len", len(key.Secret))
+
+		signer, err := d.newSigner(key.Secret)
+		key.Zeroize() // zeroize immediately after signer is constructed, even on error path
+		if err != nil {
+			log.Debug("signer: construction failed", "pubkey", pkHex, "error", err)
+			return err
+		}
+		log.Debug("signer: ready", "pubkey", pkHex)
+
+		gen := deposit.NewGenerator(signer, d.verifier, params)
+		log.Debug("deposit: generating entry", "pubkey", pkHex, "network", cfg.Network)
+		e, err := gen.Generate(ctx, deposit.Request{
+			Network:               cfg.Network,
+			Pubkeys:               [][48]byte{pk},
+			WithdrawalCredentials: defaultWithdrawalCreds(),
+			AmountGwei:            32_000_000_000,
+			DepositCLIVersion:     CLIVersion,
+		})
+		if err != nil {
+			log.Debug("deposit: generation failed", "pubkey", pkHex, "error", err)
+			return err
+		}
+		entries = append(entries, e...)
 	}
 	log.Debug("deposit: generation complete", "entry_count", len(entries))
 
-	// Step 7: write the deposit data JSON atomically.
+	// Step 5: write the deposit data JSON atomically.
 	log.Debug("output: writing deposit data", "output_dir", cfg.OutputDir, "entry_count", len(entries))
 	path, sum, err := d.writer.Write(ctx, cfg.OutputDir, entries, time.Now())
 	if err != nil {
@@ -240,6 +257,7 @@ func exitCodeFor(err error) int {
 		errors.Is(err, keystore.ErrKeystoreMalformed) ||
 		errors.Is(err, keystore.ErrKeystoreVersion) ||
 		errors.Is(err, keystore.ErrEnvVarEmpty) ||
+		errors.Is(err, keystore.ErrKeystoreNotFound) ||
 		errors.Is(err, deposit.ErrPubkeyMismatch) ||
 		errors.Is(err, errMainnetAckRequired) {
 		return 2

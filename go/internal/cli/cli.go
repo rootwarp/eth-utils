@@ -19,8 +19,8 @@ import (
 
 // Config holds the validated, parsed inputs from the CLI flags.
 type Config struct {
-	// KeystorePath is the filesystem path to the EIP-2335 JSON keystore.
-	KeystorePath string
+	// KeystoreDir is the filesystem path to the directory containing EIP-2335 JSON keystore files.
+	KeystoreDir string
 
 	// Pubkeys is the decoded list of 48-byte BLS12-381 G1 compressed points.
 	Pubkeys [][48]byte
@@ -54,7 +54,7 @@ func NewApp(run func(context.Context, Config) error) *ucli.App {
 	app := ucli.NewApp()
 	app.Name = "eth-deposit-gen"
 	app.Usage = "Generate Launchpad-compatible deposit_data JSON for existing BLS validator keys"
-	app.UsageText = `eth-deposit-gen --validator-key-path PATH --pubkeys HEX[,...] --network NET --output-dir DIR [--passphrase-env VAR]`
+	app.UsageText = `eth-deposit-gen --keystore-dir DIR --pubkeys HEX[,...] --network NET --output-dir DIR [--passphrase-env VAR]`
 	app.Description = `Produces deposit_data-<ts>.json for one or more BLS validator public keys by
 signing each deposit message with the BLS key loaded from an EIP-2335 keystore.
 Output is byte-for-byte compatible with the official ethereum/staking-deposit-cli.`
@@ -70,10 +70,10 @@ DESCRIPTION:
    {{.Description}}
 
 EXAMPLES:
-   # Hoodi testnet, two pubkeys
+   # Hoodi testnet, two pubkeys (keystores directory contains one .json per validator)
    eth-deposit-gen \
      --network hoodi \
-     --validator-key-path ./bls-keystore.json \
+     --keystore-dir ./keystores/ \
      --pubkeys 0x93247f2209abcafd...,0xa1b2c3d4e5f6... \
      --output-dir ./out
 
@@ -81,7 +81,7 @@ EXAMPLES:
    eth-deposit-gen \
      --network mainnet \
      --i-understand-this-is-mainnet \
-     --validator-key-path ./bls-keystore.json \
+     --keystore-dir ./keystores/ \
      --pubkeys 0x93247f2209abcafd... \
      --output-dir ./out
 
@@ -92,8 +92,8 @@ OPTIONS:
 
 	app.Flags = []ucli.Flag{
 		&ucli.StringFlag{
-			Name:     "validator-key-path",
-			Usage:    "Path to the EIP-2335 JSON keystore containing the BLS signing key",
+			Name:     "keystore-dir",
+			Usage:    "Directory containing EIP-2335 JSON keystore files, one per validator (e.g. ./keystores/)",
 			Required: true,
 		},
 		&ucli.StringFlag{
@@ -122,7 +122,8 @@ OPTIONS:
 	}
 
 	app.Action = func(c *ucli.Context) error {
-		// Validation order: network first (per spec), then mainnet ack, then pubkeys, then output-dir.
+		// Validation order: network first (per spec), then mainnet ack, then pubkeys,
+		// then keystore-dir (directory readability probe), then output-dir.
 
 		// 1. Parse and validate --network
 		net, err := network.ParseFlag(c.String("network"))
@@ -143,14 +144,20 @@ OPTIONS:
 			return ucli.Exit(fmt.Sprintf("--pubkeys: %v", err), 2)
 		}
 
-		// 3. Validate --output-dir
+		// 3. Validate --keystore-dir
+		keystoreDir := c.String("keystore-dir")
+		if err := validateKeystoreDir(keystoreDir); err != nil {
+			return ucli.Exit(fmt.Sprintf("--keystore-dir: %v", err), 2)
+		}
+
+		// 4. Validate --output-dir
 		outputDir := c.String("output-dir")
 		if err := validateOutputDir(outputDir); err != nil {
 			return ucli.Exit(fmt.Sprintf("--output-dir: %v", err), 2)
 		}
 
 		cfg := Config{
-			KeystorePath:  c.String("validator-key-path"),
+			KeystoreDir:   keystoreDir,
 			Pubkeys:       pubkeys,
 			Network:       net,
 			OutputDir:     outputDir,
@@ -158,7 +165,7 @@ OPTIONS:
 			MainnetAck:    mainnetAck,
 		}
 
-		// 4. Print confirmation banner to stderr before invoking run.
+		// 5. Print confirmation banner to stderr before invoking run.
 		printBanner(c.App.ErrWriter, cfg)
 
 		return run(c.Context, cfg)
@@ -231,6 +238,16 @@ func parsePubkeys(s string) ([][48]byte, error) {
 	return result, nil
 }
 
+// validateKeystoreDir checks that dir exists and is a readable directory.
+// It probes readability by calling os.ReadDir; any error (non-directory path or
+// permission error) is returned as a user error (exit code 2 via the caller).
+func validateKeystoreDir(dir string) error {
+	if _, err := os.ReadDir(dir); err != nil {
+		return fmt.Errorf("cannot read keystore directory %q: %w", dir, err)
+	}
+	return nil
+}
+
 // validateOutputDir checks that dir exists and the process can write to it.
 // It probes writability by creating and immediately removing a temporary file.
 func validateOutputDir(dir string) error {
@@ -250,8 +267,8 @@ func validateOutputDir(dir string) error {
 	if err != nil {
 		return fmt.Errorf("directory %q is not writable: %w", dir, err)
 	}
-	f.Close()             //nolint:errcheck
-	os.Remove(f.Name())   //nolint:errcheck
+	f.Close()           //nolint:errcheck
+	os.Remove(f.Name()) //nolint:errcheck
 	return nil
 }
 

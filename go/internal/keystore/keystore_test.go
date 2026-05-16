@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
 	"github.com/rootwarp/eth-utils/go/internal/keystore"
+	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
 )
 
 const (
-	testPassphrase  = "testpassword"
-	testPubkeyHex   = "b9e7be8b1eea5ca44d9b1ef6e60de0b7e213d7e6b3f29e4a0e6a93b56678e58c2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1"
+	testPassphrase = "testpassword"
+	testPubkeyHex  = "b9e7be8b1eea5ca44d9b1ef6e60de0b7e213d7e6b3f29e4a0e6a93b56678e58c2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1b4e2d1"
 )
 
 // testSecret is 32 bytes used as the BLS secret in fixture keystores.

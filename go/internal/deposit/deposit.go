@@ -70,8 +70,8 @@ type Entry struct {
 type Generator struct {
 	signer   bls.Signer
 	verifier bls.Verifier
-	domain   [32]byte        // precomputed: ComputeDomain(DomainDeposit, forkVersion, ZeroGVR)
-	params   network.Params  // stored for ForkVersion and NetworkName in entries
+	domain   [32]byte       // precomputed: ComputeDomain(DomainDeposit, forkVersion, ZeroGVR)
+	params   network.Params // stored for ForkVersion and NetworkName in entries
 }
 
 // NewGenerator constructs a Generator that signs with s, verifies with v, and

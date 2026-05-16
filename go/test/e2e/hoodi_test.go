@@ -97,7 +97,7 @@ func (b *bytesPassphraseSource) Read() ([]byte, error) {
 func TestHoodiGoldenDeposit(t *testing.T) {
 	// --- Load fixtures from testdata/hoodi/ ---
 
-	keystorePath := testdataDir + "/keystore.json"
+	keystorePath := testdataDir + "/keystores/keystore.json"
 	passphrasePath := testdataDir + "/passphrase.txt"
 	pubkeysPath := testdataDir + "/pubkeys.txt"
 	expectedPath := testdataDir + "/deposit_data-expected.json"
@@ -319,12 +319,12 @@ func refreshGoldenFixtures(t *testing.T) error {
 	}
 
 	// Write all files.
-	if err := os.MkdirAll(testdataDir, 0o750); err != nil {
-		return fmt.Errorf("mkdir testdata/hoodi: %w", err)
+	if err := os.MkdirAll(testdataDir+"/keystores", 0o750); err != nil {
+		return fmt.Errorf("mkdir testdata/hoodi/keystores: %w", err)
 	}
 
 	files := map[string][]byte{
-		testdataDir + "/keystore.json":              keystoreBytes,
+		testdataDir + "/keystores/keystore.json":    keystoreBytes,
 		testdataDir + "/passphrase.txt":             []byte(goldenPassphrase),
 		testdataDir + "/pubkeys.txt":                []byte(pubHex),
 		testdataDir + "/deposit_data-expected.json": depositBuf.Bytes(),

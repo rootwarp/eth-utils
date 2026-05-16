@@ -27,8 +27,8 @@ import (
 
 // fakeLoader is a KeyLoader that returns a fixed key or error.
 type fakeLoader struct {
-	key    keystore.Key
-	err    error
+	key keystore.Key
+	err error
 }
 
 func (f *fakeLoader) Load(_ context.Context, _ string, _ keystore.PassphraseSource) (keystore.Key, error) {
@@ -72,6 +72,16 @@ func (f *fakeWriter) Write(_ context.Context, _ string, _ []deposit.Entry, _ tim
 }
 
 // ---------------------------------------------------------------------------
+// fakeScanner is a scanner func that returns a fixed DirectoryIndex or error.
+type fakeScanner struct {
+	index keystore.DirectoryIndex
+	err   error
+}
+
+func (f *fakeScanner) scan(_ string) (keystore.DirectoryIndex, error) {
+	return f.index, f.err
+}
+
 // makeTestDeps returns a valid deps set that can be customised per test case.
 // The fake pubkey and signer pubkey must match for the deposit pipeline to succeed.
 // ---------------------------------------------------------------------------
@@ -80,6 +90,7 @@ func makeTestDeps(summaryBuf *bytes.Buffer, writerOverride output.Writer) deps {
 	// Use a known 48-byte pubkey for the fake signer.
 	var pk [48]byte
 	pk[0] = 0xAB
+	pkHex := fmt.Sprintf("%x", pk[:])
 
 	fakeSign := &fakeSigner{pubkey: pk}
 
@@ -90,11 +101,18 @@ func makeTestDeps(summaryBuf *bytes.Buffer, writerOverride output.Writer) deps {
 		w = &fakeWriter{path: "/out/deposit_data-1.json", sha256hex: "cafebabe"}
 	}
 
+	// Build a DirectoryIndex that maps the fake pubkey to a fake path.
+	idx := keystore.DirectoryIndex{
+		pkHex: "/fake/keystore.json",
+	}
+	fs := &fakeScanner{index: idx}
+
 	return deps{
 		initBLS: func() error { return nil },
+		scanner: fs.scan,
 		loader: &fakeLoader{key: keystore.Key{
 			Secret:    make([]byte, 32), // 32 zero bytes (valid length)
-			PubkeyHex: fmt.Sprintf("%x", pk[:]),
+			PubkeyHex: pkHex,
 		}},
 		newSigner: func(_ []byte) (bls.Signer, error) {
 			return fakeSign, nil
@@ -111,10 +129,10 @@ func makeCfg() cli.Config {
 	var pk [48]byte
 	pk[0] = 0xAB
 	return cli.Config{
-		KeystorePath: "/fake/keystore.json",
-		Pubkeys:      [][48]byte{pk},
-		Network:      network.Hoodi,
-		OutputDir:    "/tmp",
+		KeystoreDir: "/fake/keystores",
+		Pubkeys:     [][48]byte{pk},
+		Network:     network.Hoodi,
+		OutputDir:   "/tmp",
 	}
 }
 
@@ -211,10 +229,21 @@ func TestRunWithDeps_PubkeyMismatch_ExitCode2(t *testing.T) {
 	var summaryBuf bytes.Buffer
 	d := makeTestDeps(&summaryBuf, nil)
 
-	// The cfg asks for pubkey 0xBB but the signer will return 0xAB → mismatch.
-	cfg := makeCfg()
+	// The cfg asks for pubkey 0xBB, but the signer (returned for any key) has
+	// pubkey 0xAB → deposit.Generator detects the mismatch → ErrPubkeyMismatch.
+	// We must include 0xBB in the scanner index so the scan lookup succeeds;
+	// the pubkey mismatch is detected later in the deposit pipeline.
 	var wrongPk [48]byte
 	wrongPk[0] = 0xBB
+	wrongPkHex := fmt.Sprintf("%x", wrongPk[:])
+
+	d.scanner = func(_ string) (keystore.DirectoryIndex, error) {
+		return keystore.DirectoryIndex{
+			wrongPkHex: "/fake/wrong-keystore.json",
+		}, nil
+	}
+
+	cfg := makeCfg()
 	cfg.Pubkeys = [][48]byte{wrongPk}
 
 	err := runWithDeps(context.Background(), cfg, d)
@@ -300,6 +329,8 @@ func TestExitCodeFor_ErrorCodes(t *testing.T) {
 		{"ErrKeystoreVersion", keystore.ErrKeystoreVersion, 2},
 		{"ErrEnvVarEmpty", keystore.ErrEnvVarEmpty, 2},
 		{"ErrEnvVarEmpty wrapped", fmt.Errorf("passphrase source: %w", keystore.ErrEnvVarEmpty), 2},
+		{"ErrKeystoreNotFound", keystore.ErrKeystoreNotFound, 2},
+		{"ErrKeystoreNotFound wrapped", fmt.Errorf("no keystore found for pubkey 0xaabb in /dir: %w", keystore.ErrKeystoreNotFound), 2},
 		{"ErrPubkeyMismatch", deposit.ErrPubkeyMismatch, 2},
 		{"ErrPubkeyMismatch wrapped", fmt.Errorf("wrap: %w", deposit.ErrPubkeyMismatch), 2},
 		{"ExitCoder code 2", exitCoder2, 2},
@@ -437,4 +468,71 @@ func TestPickPassphraseSource_TermSource(t *testing.T) {
 	// We can't call Read() on a term source in tests (no TTY), but we can
 	// verify it's non-nil and satisfies the interface.
 	_ = src
+}
+
+// ---------------------------------------------------------------------------
+// TestRunWithDeps — scanner-specific tests
+// ---------------------------------------------------------------------------
+
+func TestRunWithDeps_ScannerError_ExitCode1(t *testing.T) {
+	var summaryBuf bytes.Buffer
+	d := makeTestDeps(&summaryBuf, nil)
+	d.scanner = func(_ string) (keystore.DirectoryIndex, error) {
+		return nil, errors.New("cannot read directory: permission denied")
+	}
+
+	err := runWithDeps(context.Background(), makeCfg(), d)
+	if err == nil {
+		t.Fatal("runWithDeps() returned nil error, want scanner error")
+	}
+	// Scanner errors from unreadable dirs are not user errors; they map to code 1.
+	if code := exitCodeFor(err); code != 1 {
+		t.Errorf("exitCodeFor(scanner error) = %d, want 1", code)
+	}
+}
+
+func TestRunWithDeps_PubkeyNotInIndex_ExitCode2(t *testing.T) {
+	var summaryBuf bytes.Buffer
+	d := makeTestDeps(&summaryBuf, nil)
+
+	// Override scanner to return an empty index — pubkey won't be found.
+	d.scanner = func(_ string) (keystore.DirectoryIndex, error) {
+		return keystore.DirectoryIndex{}, nil
+	}
+
+	err := runWithDeps(context.Background(), makeCfg(), d)
+	if err == nil {
+		t.Fatal("runWithDeps() returned nil error, want ErrKeystoreNotFound")
+	}
+	if !errors.Is(err, keystore.ErrKeystoreNotFound) {
+		t.Errorf("error = %v, want wrapped ErrKeystoreNotFound", err)
+	}
+	if code := exitCodeFor(err); code != 2 {
+		t.Errorf("exitCodeFor(ErrKeystoreNotFound) = %d, want 2", code)
+	}
+}
+
+func TestRunWithDeps_ErrorMessageContainsPubkeyAndDir(t *testing.T) {
+	var summaryBuf bytes.Buffer
+	d := makeTestDeps(&summaryBuf, nil)
+
+	// Empty index so the lookup fails.
+	d.scanner = func(_ string) (keystore.DirectoryIndex, error) {
+		return keystore.DirectoryIndex{}, nil
+	}
+
+	cfg := makeCfg()
+	err := runWithDeps(context.Background(), cfg, d)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	msg := err.Error()
+	// Error must mention the pubkey (0x-prefixed) and the keystore dir.
+	if !strings.Contains(msg, "0x") {
+		t.Errorf("error message %q does not mention pubkey (0x prefix)", msg)
+	}
+	if !strings.Contains(msg, cfg.KeystoreDir) {
+		t.Errorf("error message %q does not mention keystore dir %q", msg, cfg.KeystoreDir)
+	}
 }

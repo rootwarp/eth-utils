@@ -15,10 +15,10 @@ import (
 // -----------------------------------------------------------------------------
 
 type fakeSigner struct {
-	pubkey   [48]byte
-	sig      [96]byte
-	signErr  error
-	onSign   func() // called before returning from Sign; used for ctx cancel tests
+	pubkey  [48]byte
+	sig     [96]byte
+	signErr error
+	onSign  func() // called before returning from Sign; used for ctx cancel tests
 }
 
 func (f *fakeSigner) Sign(_ [32]byte) ([96]byte, error) {
@@ -172,7 +172,7 @@ func TestGenerate_Success(t *testing.T) {
 // emitted.
 func TestGenerate_PubkeyMismatch(t *testing.T) {
 	params := hoodiParams()
-	signerPubkey := makePubkey(0xAA) // signer has this key
+	signerPubkey := makePubkey(0xAA)  // signer has this key
 	requestPubkey := makePubkey(0xBB) // but request asks for this key
 
 	signer := &fakeSigner{pubkey: signerPubkey}

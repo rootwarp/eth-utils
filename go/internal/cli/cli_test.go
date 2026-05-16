@@ -91,6 +91,7 @@ func runApp(t *testing.T, args []string) (cfg icli.Config, stderr string, runCal
 // TestMissingRequiredFlags verifies that omitting each required flag returns an error.
 func TestMissingRequiredFlags(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir() // a real directory for --keystore-dir
 
 	tests := []struct {
 		name    string
@@ -98,28 +99,28 @@ func TestMissingRequiredFlags(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "missing_validator_key_path",
+			name:    "missing_keystore_dir",
 			args:    []string{"--pubkeys", "0x" + validPubkey, "--network", "hoodi", "--output-dir", dir},
 			wantErr: true,
 		},
 		{
 			name:    "missing_pubkeys",
-			args:    []string{"--validator-key-path", "/fake/path", "--network", "hoodi", "--output-dir", dir},
+			args:    []string{"--keystore-dir", ksDir, "--network", "hoodi", "--output-dir", dir},
 			wantErr: true,
 		},
 		{
 			name:    "missing_network",
-			args:    []string{"--validator-key-path", "/fake/path", "--pubkeys", "0x" + validPubkey, "--output-dir", dir},
+			args:    []string{"--keystore-dir", ksDir, "--pubkeys", "0x" + validPubkey, "--output-dir", dir},
 			wantErr: true,
 		},
 		{
 			name:    "missing_output_dir",
-			args:    []string{"--validator-key-path", "/fake/path", "--pubkeys", "0x" + validPubkey, "--network", "hoodi"},
+			args:    []string{"--keystore-dir", ksDir, "--pubkeys", "0x" + validPubkey, "--network", "hoodi"},
 			wantErr: true,
 		},
 		{
 			name:    "all_required_flags_present",
-			args:    []string{"--validator-key-path", "/fake/path", "--pubkeys", "0x" + validPubkey, "--network", "hoodi", "--output-dir", dir},
+			args:    []string{"--keystore-dir", ksDir, "--pubkeys", "0x" + validPubkey, "--network", "hoodi", "--output-dir", dir},
 			wantErr: false,
 		},
 	}
@@ -140,6 +141,7 @@ func TestMissingRequiredFlags(t *testing.T) {
 // TestInvalidNetwork verifies that an unknown --network value returns an error before run is called.
 func TestInvalidNetwork(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 
 	tests := []struct {
 		network string
@@ -156,7 +158,7 @@ func TestInvalidNetwork(t *testing.T) {
 	for _, tc := range tests {
 		t.Run("network_"+tc.network, func(t *testing.T) {
 			args := []string{
-				"--validator-key-path", "/fake/path",
+				"--keystore-dir", ksDir,
 				"--pubkeys", "0x" + validPubkey,
 				"--network", tc.network,
 				"--output-dir", dir,
@@ -164,7 +166,7 @@ func TestInvalidNetwork(t *testing.T) {
 			// Empty network will be a missing flag scenario; add it anyway
 			if tc.network == "" {
 				args = []string{
-					"--validator-key-path", "/fake/path",
+					"--keystore-dir", ksDir,
 					"--pubkeys", "0x" + validPubkey,
 					"--output-dir", dir,
 				}
@@ -194,6 +196,7 @@ func TestInvalidNetwork(t *testing.T) {
 // TestPubkeyHexLength verifies that pubkeys with wrong hex length return an error.
 func TestPubkeyHexLength(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 
 	tests := []struct {
 		name    string
@@ -230,7 +233,7 @@ func TestPubkeyHexLength(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			args := []string{
-				"--validator-key-path", "/fake/path",
+				"--keystore-dir", ksDir,
 				"--pubkeys", tc.pubkeys,
 				"--network", "hoodi",
 				"--output-dir", dir,
@@ -249,11 +252,12 @@ func TestPubkeyHexLength(t *testing.T) {
 // TestPubkeyInvalidHexChars verifies that non-hex characters in pubkeys return an error.
 func TestPubkeyInvalidHexChars(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 
 	// Replace some chars with non-hex
 	invalidHex := strings.Repeat("g", 96) // 'g' is not a hex char
 	args := []string{
-		"--validator-key-path", "/fake/path",
+		"--keystore-dir", ksDir,
 		"--pubkeys", invalidHex,
 		"--network", "hoodi",
 		"--output-dir", dir,
@@ -267,11 +271,12 @@ func TestPubkeyInvalidHexChars(t *testing.T) {
 // TestPubkeyMixedPrefix verifies that mixing 0x-prefixed and unprefixed pubkeys returns an error.
 func TestPubkeyMixedPrefix(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 
 	// First has 0x, second does not
 	mixed := "0x" + validPubkey + "," + validPubkey2
 	args := []string{
-		"--validator-key-path", "/fake/path",
+		"--keystore-dir", ksDir,
 		"--pubkeys", mixed,
 		"--network", "hoodi",
 		"--output-dir", dir,
@@ -284,9 +289,10 @@ func TestPubkeyMixedPrefix(t *testing.T) {
 
 // TestNonexistentOutputDir verifies that a non-existent output dir returns an error.
 func TestNonexistentOutputDir(t *testing.T) {
+	ksDir := t.TempDir()
 	nonExistent := filepath.Join(t.TempDir(), "does-not-exist")
 	args := []string{
-		"--validator-key-path", "/fake/path",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "0x" + validPubkey,
 		"--network", "hoodi",
 		"--output-dir", nonExistent,
@@ -317,8 +323,9 @@ func TestReadOnlyOutputDir(t *testing.T) {
 		t.Fatalf("Chmod: %v", err)
 	}
 
+	ksDir := t.TempDir()
 	args := []string{
-		"--validator-key-path", "/fake/path",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "0x" + validPubkey,
 		"--network", "hoodi",
 		"--output-dir", roDir,
@@ -332,8 +339,9 @@ func TestReadOnlyOutputDir(t *testing.T) {
 // TestSinglePubkeyHappyPath verifies that a single valid pubkey passes through correctly.
 func TestSinglePubkeyHappyPath(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 	args := []string{
-		"--validator-key-path", "/some/keystore.json",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "0x" + validPubkey,
 		"--network", "hoodi",
 		"--output-dir", dir,
@@ -347,8 +355,8 @@ func TestSinglePubkeyHappyPath(t *testing.T) {
 	}
 
 	// Verify Config fields
-	if cfg.KeystorePath != "/some/keystore.json" {
-		t.Errorf("KeystorePath = %q, want %q", cfg.KeystorePath, "/some/keystore.json")
+	if cfg.KeystoreDir != ksDir {
+		t.Errorf("KeystoreDir = %q, want %q", cfg.KeystoreDir, ksDir)
 	}
 	if cfg.Network != network.Hoodi {
 		t.Errorf("Network = %q, want %q", cfg.Network, network.Hoodi)
@@ -375,9 +383,10 @@ func TestSinglePubkeyHappyPath(t *testing.T) {
 // TestMultiPubkeyHappyPath verifies that multiple valid pubkeys pass through correctly.
 func TestMultiPubkeyHappyPath(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 	pubkeys := "0x" + validPubkey + ",0x" + validPubkey2
 	args := []string{
-		"--validator-key-path", "/some/keystore.json",
+		"--keystore-dir", ksDir,
 		"--pubkeys", pubkeys,
 		"--network", "hoodi",
 		"--output-dir", dir,
@@ -409,10 +418,11 @@ func TestMultiPubkeyHappyPath(t *testing.T) {
 // TestPassphraseEnvOptional verifies that --passphrase-env is optional and propagated.
 func TestPassphraseEnvOptional(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 
 	t.Run("without_passphrase_env", func(t *testing.T) {
 		args := []string{
-			"--validator-key-path", "/some/keystore.json",
+			"--keystore-dir", ksDir,
 			"--pubkeys", "0x" + validPubkey,
 			"--network", "hoodi",
 			"--output-dir", dir,
@@ -431,7 +441,7 @@ func TestPassphraseEnvOptional(t *testing.T) {
 
 	t.Run("with_passphrase_env", func(t *testing.T) {
 		args := []string{
-			"--validator-key-path", "/some/keystore.json",
+			"--keystore-dir", ksDir,
 			"--pubkeys", "0x" + validPubkey,
 			"--network", "hoodi",
 			"--output-dir", dir,
@@ -453,8 +463,9 @@ func TestPassphraseEnvOptional(t *testing.T) {
 // TestBannerFormat verifies the confirmation banner format more precisely.
 func TestBannerFormat(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 	args := []string{
-		"--validator-key-path", "/some/keystore.json",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "0x" + validPubkey + ",0x" + validPubkey2,
 		"--network", "hoodi",
 		"--output-dir", dir,
@@ -475,8 +486,9 @@ func TestBannerFormat(t *testing.T) {
 // TestUnprefixedPubkeys verifies that all-unprefixed pubkeys are also accepted.
 func TestUnprefixedPubkeys(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 	args := []string{
-		"--validator-key-path", "/some/keystore.json",
+		"--keystore-dir", ksDir,
 		"--pubkeys", validPubkey + "," + validPubkey2,
 		"--network", "hoodi",
 		"--output-dir", dir,
@@ -496,8 +508,9 @@ func TestUnprefixedPubkeys(t *testing.T) {
 // TestNetworkParsedBeforeOtherWork verifies that invalid network is rejected before run is called.
 func TestNetworkParsedBeforeOtherWork(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 	args := []string{
-		"--validator-key-path", "/fake/path",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "0x" + validPubkey,
 		"--network", "invalidnet",
 		"--output-dir", dir,
@@ -513,6 +526,7 @@ func TestNetworkParsedBeforeOtherWork(t *testing.T) {
 
 // TestOutputDirIsFile verifies that passing a file path as --output-dir returns an error.
 func TestOutputDirIsFile(t *testing.T) {
+	ksDir := t.TempDir()
 	// Create a file (not a directory)
 	f, err := os.CreateTemp(t.TempDir(), "not-a-dir-*")
 	if err != nil {
@@ -522,7 +536,7 @@ func TestOutputDirIsFile(t *testing.T) {
 	filePath := f.Name()
 
 	args := []string{
-		"--validator-key-path", "/fake/path",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "0x" + validPubkey,
 		"--network", "hoodi",
 		"--output-dir", filePath,
@@ -537,8 +551,9 @@ func TestOutputDirIsFile(t *testing.T) {
 // ucli.ExitCoder values with exit code 1, matching the urfave/cli convention.
 func TestErrorIsExitCoder(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 	args := []string{
-		"--validator-key-path", "/fake/path",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "not-valid-hex!!!",
 		"--network", "hoodi",
 		"--output-dir", dir,
@@ -561,8 +576,9 @@ func TestErrorIsExitCoder(t *testing.T) {
 // returns exit code 2 and never invokes the run callback.
 func TestMainnetWithoutAck(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 	args := []string{
-		"--validator-key-path", "/fake/path",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "0x" + validPubkey,
 		"--network", "mainnet",
 		"--output-dir", dir,
@@ -598,8 +614,9 @@ func TestMainnetWithoutAck(t *testing.T) {
 // that a library upgrade cannot silently change the behaviour.
 func TestMainnetWithExplicitFalseAck(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 	args := []string{
-		"--validator-key-path", "/fake/path",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "0x" + validPubkey,
 		"--network", "mainnet",
 		"--output-dir", dir,
@@ -629,8 +646,9 @@ func TestMainnetWithExplicitFalseAck(t *testing.T) {
 // trigger exit code 2 (the final value of false governs the gate).
 func TestMainnetAckRepeatedOverride(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 	args := []string{
-		"--validator-key-path", "/fake/path",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "0x" + validPubkey,
 		"--network", "mainnet",
 		"--output-dir", dir,
@@ -657,8 +675,9 @@ func TestMainnetAckRepeatedOverride(t *testing.T) {
 // allows signing to proceed and emits a banner containing "MAINNET" (uppercase).
 func TestMainnetWithAck(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 	args := []string{
-		"--validator-key-path", "/some/keystore.json",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "0x" + validPubkey,
 		"--network", "mainnet",
 		"--output-dir", dir,
@@ -686,8 +705,9 @@ func TestMainnetWithAck(t *testing.T) {
 // proceeds normally and the banner shows lowercase "hoodi" (not "HOODI").
 func TestHoodiWithAckFlag(t *testing.T) {
 	dir := t.TempDir()
+	ksDir := t.TempDir()
 	args := []string{
-		"--validator-key-path", "/some/keystore.json",
+		"--keystore-dir", ksDir,
 		"--pubkeys", "0x" + validPubkey,
 		"--network", "hoodi",
 		"--output-dir", dir,
@@ -709,4 +729,43 @@ func TestHoodiWithAckFlag(t *testing.T) {
 	if strings.Contains(stderr, "MAINNET") {
 		t.Errorf("banner %q unexpectedly contains MAINNET for hoodi network", stderr)
 	}
+}
+
+// TestKeystoreDirValidation verifies that --keystore-dir must point to an existing,
+// readable directory, matching AC3 of Issue #25.
+func TestKeystoreDirValidation(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("nonexistent_dir", func(t *testing.T) {
+		nonExistent := filepath.Join(t.TempDir(), "no-such-dir")
+		args := []string{
+			"--keystore-dir", nonExistent,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+		}
+		_, _, _, err := runApp(t, args)
+		if err == nil {
+			t.Errorf("runApp with nonexistent keystore-dir: error = nil, want error")
+		}
+	})
+
+	t.Run("file_instead_of_dir", func(t *testing.T) {
+		// Create a regular file and pass it as --keystore-dir
+		f, err := os.CreateTemp(t.TempDir(), "not-a-dir-*")
+		if err != nil {
+			t.Fatalf("CreateTemp: %v", err)
+		}
+		f.Close()
+		args := []string{
+			"--keystore-dir", f.Name(),
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+		}
+		_, _, _, err = runApp(t, args)
+		if err == nil {
+			t.Errorf("runApp with file as keystore-dir: error = nil, want error")
+		}
+	})
 }
