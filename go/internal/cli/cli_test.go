@@ -731,6 +731,52 @@ func TestHoodiWithAckFlag(t *testing.T) {
 	}
 }
 
+// TestDryRunFlag verifies that --dry-run is parsed and propagated to Config.DryRun.
+func TestDryRunFlag(t *testing.T) {
+	dir := t.TempDir()
+	ksDir := t.TempDir()
+
+	t.Run("default_false", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+			// intentionally omitting --dry-run
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if cfg.DryRun {
+			t.Errorf("DryRun = true, want false when flag is absent")
+		}
+	})
+
+	t.Run("explicit_true", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+			"--dry-run",
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if !cfg.DryRun {
+			t.Errorf("DryRun = false, want true when --dry-run is set")
+		}
+	})
+}
+
 // TestKeystoreDirValidation verifies that --keystore-dir must point to an existing,
 // readable directory, matching AC3 of Issue #25.
 func TestKeystoreDirValidation(t *testing.T) {

@@ -3,10 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -534,5 +538,175 @@ func TestRunWithDeps_ErrorMessageContainsPubkeyAndDir(t *testing.T) {
 	}
 	if !strings.Contains(msg, cfg.KeystoreDir) {
 		t.Errorf("error message %q does not mention keystore dir %q", msg, cfg.KeystoreDir)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestPrintSummary_DryRunEmptyPath verifies that an empty path (returned by
+// DryRunWriter) is rendered as "<stdout>" in the summary line.
+func TestPrintSummary_DryRunEmptyPath(t *testing.T) {
+	var buf bytes.Buffer
+	printSummary(&buf, "", "deadbeef", 1, network.Hoodi)
+	got := buf.String()
+	if !strings.Contains(got, "wrote <stdout>") {
+		t.Errorf("printSummary with empty path: %q does not contain %q", got, "wrote <stdout>")
+	}
+}
+
+// TestPickWriter — verifies that pickWriter selects the correct writer type
+// ---------------------------------------------------------------------------
+
+func TestPickWriter_FSWriterWhenDryRunFalse(t *testing.T) {
+	cfg := cli.Config{DryRun: false}
+	w := pickWriter(cfg, io.Discard)
+	if w == nil {
+		t.Fatal("pickWriter returned nil")
+	}
+	// FSWriter produces a non-empty path; DryRunWriter produces an empty path.
+	// We can't distinguish the concrete type without a type assertion, but we
+	// can verify behavior: FSWriter.Write returns an error when dir is not
+	// writable (we pass "/nonexistent"), while DryRunWriter writes to the
+	// provided io.Writer and returns ("", sha256, nil).
+	// Use a temp dir so FSWriter doesn't error on dir access.
+	dir := t.TempDir()
+	path, _, err := w.Write(context.Background(), dir, []deposit.Entry{}, time.Now())
+	if err != nil {
+		t.Fatalf("FSWriter.Write: %v", err)
+	}
+	if path == "" {
+		t.Errorf("FSWriter returned empty path; want non-empty (a real file path)")
+	}
+}
+
+func TestPickWriter_DryRunWriterWhenDryRunTrue(t *testing.T) {
+	var stdoutBuf bytes.Buffer
+	cfg := cli.Config{DryRun: true}
+	w := pickWriter(cfg, &stdoutBuf)
+	if w == nil {
+		t.Fatal("pickWriter returned nil")
+	}
+	// DryRunWriter.Write always returns ("", sha256, nil) — path is empty.
+	path, _, err := w.Write(context.Background(), "", []deposit.Entry{}, time.Now())
+	if err != nil {
+		t.Fatalf("DryRunWriter.Write: %v", err)
+	}
+	if path != "" {
+		t.Errorf("DryRunWriter returned non-empty path %q; want empty", path)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestRunWithDeps_DryRun — dry-run mode integration tests
+// ---------------------------------------------------------------------------
+
+// TestRunWithDeps_DryRun_StdoutContainsJSON verifies that with DryRun=true,
+// stdout receives valid JSON and the summary sha256 matches the sha256 of
+// the bytes written to stdout. (AC#3, AC#5)
+func TestRunWithDeps_DryRun_StdoutContainsJSON(t *testing.T) {
+	var stdoutBuf bytes.Buffer
+	var summaryBuf bytes.Buffer
+
+	// Build deps with a DryRunWriter pointing to stdoutBuf.
+	d := makeTestDeps(&summaryBuf, output.NewDryRunWriter(&stdoutBuf))
+	cfg := makeCfg()
+	cfg.DryRun = true
+
+	if err := runWithDeps(context.Background(), cfg, d); err != nil {
+		t.Fatalf("runWithDeps(dry-run): %v", err)
+	}
+
+	// AC#5a: stdout must contain valid JSON.
+	got := stdoutBuf.Bytes()
+	var parsed []any
+	if err := json.Unmarshal(got, &parsed); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\nstdout: %s", err, got)
+	}
+
+	// AC#3: sha256 in summary must match sha256 of bytes written to stdout.
+	h := sha256.Sum256(got)
+	wantSHA := hex.EncodeToString(h[:])
+	summary := summaryBuf.String()
+	if !strings.Contains(summary, "sha256="+wantSHA) {
+		t.Errorf("summary sha256 does not match stdout sha256\nsummary: %q\nwant sha256=%s", summary, wantSHA)
+	}
+}
+
+// TestRunWithDeps_DryRun_OutputDirEmpty verifies that no files are created
+// in output-dir when DryRun=true. (AC#5b)
+func TestRunWithDeps_DryRun_OutputDirEmpty(t *testing.T) {
+	var stdoutBuf bytes.Buffer
+	var summaryBuf bytes.Buffer
+	outDir := t.TempDir()
+
+	d := makeTestDeps(&summaryBuf, output.NewDryRunWriter(&stdoutBuf))
+	cfg := makeCfg()
+	cfg.DryRun = true
+	cfg.OutputDir = outDir
+
+	if err := runWithDeps(context.Background(), cfg, d); err != nil {
+		t.Fatalf("runWithDeps(dry-run): %v", err)
+	}
+
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%q): %v", outDir, err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name()
+		}
+		t.Errorf("output-dir not empty after dry-run; found files: %v", names)
+	}
+}
+
+// TestRunWithDeps_DryRun_SummaryStillPrinted verifies that the summary line
+// is still written to stderr in dry-run mode. (AC#3)
+func TestRunWithDeps_DryRun_SummaryStillPrinted(t *testing.T) {
+	var stdoutBuf bytes.Buffer
+	var summaryBuf bytes.Buffer
+
+	d := makeTestDeps(&summaryBuf, output.NewDryRunWriter(&stdoutBuf))
+	cfg := makeCfg()
+	cfg.DryRun = true
+
+	if err := runWithDeps(context.Background(), cfg, d); err != nil {
+		t.Fatalf("runWithDeps(dry-run): %v", err)
+	}
+
+	summary := summaryBuf.String()
+	if summary == "" {
+		t.Error("summary line was empty; expected it to be printed even in dry-run mode")
+	}
+	// sha256 and network must still appear.
+	if !strings.Contains(summary, "sha256=") {
+		t.Errorf("summary %q does not contain sha256=", summary)
+	}
+	if !strings.Contains(summary, "network=") {
+		t.Errorf("summary %q does not contain network=", summary)
+	}
+}
+
+// TestRunWithDeps_DryRun_VerifyFailureAbortsWithSameExitCode verifies that
+// self-verification still runs in dry-run mode and aborts with exit code 3. (AC#4)
+func TestRunWithDeps_DryRun_VerifyFailureAbortsWithSameExitCode(t *testing.T) {
+	var stdoutBuf bytes.Buffer
+	var summaryBuf bytes.Buffer
+
+	d := makeTestDeps(&summaryBuf, output.NewDryRunWriter(&stdoutBuf))
+	// Force the verifier to fail so self-verification aborts the pipeline.
+	d.verifier = &fakeVerifier{ok: false, err: nil}
+	cfg := makeCfg()
+	cfg.DryRun = true
+
+	err := runWithDeps(context.Background(), cfg, d)
+	if err == nil {
+		t.Fatal("runWithDeps(dry-run, bad verifier): expected error, got nil")
+	}
+	if !errors.Is(err, deposit.ErrSelfVerifyFailed) {
+		t.Errorf("error = %v, want ErrSelfVerifyFailed", err)
+	}
+	if code := exitCodeFor(err); code != 3 {
+		t.Errorf("exitCodeFor(ErrSelfVerifyFailed) = %d, want 3", code)
 	}
 }
