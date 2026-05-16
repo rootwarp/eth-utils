@@ -56,6 +56,10 @@ type signer struct {
 
 // NewSigner constructs a Signer from a 32-byte BLS secret.
 //
+// secret must be the big-endian representation of the BLS12-381 scalar, as
+// produced by EIP-2333 key derivation and stored in EIP-2335 keystores.
+// The scalar must be less than the curve order r (EIP-2333 guarantees this).
+//
 // The caller retains ownership of the secret slice and is responsible for
 // zeroizing it after this call returns. NewSigner makes an internal copy,
 // loads it into herumi, and immediately zeroizes the local copy — but it
@@ -81,8 +85,8 @@ func NewSigner(secret []byte) (Signer, error) {
 	}()
 
 	s := &signer{}
-	if err := s.sk.SetLittleEndian(localCopy); err != nil {
-		return nil, fmt.Errorf("bls: SetLittleEndian: %w", err)
+	if err := s.sk.Deserialize(localCopy); err != nil {
+		return nil, fmt.Errorf("bls: Deserialize: %w", err)
 	}
 	return s, nil
 }
