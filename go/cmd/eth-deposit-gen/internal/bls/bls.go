@@ -17,9 +17,11 @@ var (
 	initErr  error
 )
 
-// Init initialises the herumi BLS library for the BLS12-381 curve with the
-// Ethereum ETH mode (EthModeDraft07 / EthModeLatest). Calling Init more than
-// once is a no-op; it always returns the result of the first call.
+// Init initialises the herumi BLS library for the BLS12-381 curve.
+// The explicit SetETHmode(EthModeDraft07) call is redundant with what herumi's
+// Init does internally (EthModeDraft07 == EthModeLatest == 3), but is kept for
+// clarity and forward-safety. Calling Init more than once is a no-op; it always
+// returns the result of the first call.
 func Init() error {
 	initOnce.Do(func() {
 		if err := bls.Init(bls.BLS12_381); err != nil {
@@ -61,6 +63,9 @@ type signer struct {
 //
 // Returns an error if len(secret) != 32 or herumi rejects the key material.
 func NewSigner(secret []byte) (Signer, error) {
+	if err := Init(); err != nil {
+		return nil, fmt.Errorf("bls: not initialized: %w", err)
+	}
 	if len(secret) != 32 {
 		return nil, fmt.Errorf("bls: secret must be 32 bytes, got %d", len(secret))
 	}
@@ -126,6 +131,9 @@ func DefaultVerifier() Verifier {
 // signingRoot. Returns (false, nil) on a valid but non-matching signature;
 // only returns a non-nil error when the key or signature bytes are malformed.
 func (v *verifier) Verify(pub [48]byte, signingRoot [32]byte, sig [96]byte) (bool, error) {
+	if err := Init(); err != nil {
+		return false, fmt.Errorf("bls: not initialized: %w", err)
+	}
 	var hPub bls.PublicKey
 	if err := hPub.Deserialize(pub[:]); err != nil {
 		return false, fmt.Errorf("bls: deserialize pubkey: %w", err)
