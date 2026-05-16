@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +102,7 @@ func makeTestDeps(summaryBuf *bytes.Buffer, writerOverride output.Writer) deps {
 		verifier:   &fakeVerifier{ok: true},
 		writer:     w,
 		summaryOut: summaryBuf,
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
 
