@@ -116,16 +116,50 @@ OPTIONS:
 
 ### linux/amd64 Docker smoke test
 
-**DEFERRED**: Docker is not available in the local build environment. See the
-VM handoff runbook below for the exact commands to run.
-
-The linux/amd64 binary (`dist/linux-amd64_linux_amd64_v1/eth-deposit-gen`)
-is a statically linked ELF (musl libc), verified via:
+Run on 2026-05-16. Image: `ubuntu:22.04`. Docker `29.3.1` on macOS arm64 host.
+Binary extracted from `dist/eth-deposit-gen_linux_amd64.tar.gz` (statically
+linked musl ELF — no shared library dependencies in the container).
 
 ```
-$ file dist/linux-amd64_linux_amd64_v1/eth-deposit-gen
-ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, ...
+$ docker run --rm -v /tmp/eth-smoke-linux-amd64:/smoke ubuntu:22.04 \
+    /smoke/eth-deposit-gen --version
+eth-deposit-gen version v0.0.0-snapshot (commit=8028d7fc4da026c21e1881db1811406578066e34, built=2026-05-16T12:50:56Z)
 ```
+
+Exit code: 0
+
+```
+$ docker run --rm -v /tmp/eth-smoke-linux-amd64:/smoke ubuntu:22.04 \
+    /smoke/eth-deposit-gen --help
+NAME:
+   eth-deposit-gen - Generate Launchpad-compatible deposit_data JSON for existing BLS validator keys
+
+USAGE:
+   eth-deposit-gen --keystore-dir DIR --pubkeys HEX[,...] --network NET --output-dir DIR [--passphrase-env VAR]
+
+DESCRIPTION:
+   Produces deposit_data-<ts>.json for one or more BLS validator public keys by
+signing each deposit message with the BLS key loaded from an EIP-2335 keystore.
+Output is byte-for-byte compatible with the official ethereum/staking-deposit-cli.
+
+OPTIONS:
+   --keystore-dir value            Directory containing EIP-2335 JSON keystore files, one per validator (e.g. ./keystores/)
+   --pubkeys value                 Comma-separated BLS public keys in 96-hex-char form (0x-prefixed or bare)
+   --network value                 Ethereum consensus network: "mainnet" or "hoodi"
+   --output-dir value              Existing, writable directory for the output deposit_data-<ts>.json file
+   --passphrase-env value          Name of the environment variable holding the keystore passphrase (omit for TTY prompt)
+   --i-understand-this-is-mainnet  Required when --network mainnet (default: false)
+   --dry-run                       Print deposit JSON to stdout instead of writing to disk (default: false)
+   --verbose                       Enable debug-level structured logging to stderr (default: false)
+   --json-logs                     Emit logs as JSON objects (default: false)
+   --parallel value                Number of concurrent signing workers (1–16); values ≤0 or >16 are rejected (default: 1)
+   --verify-with-deposit-cli       Cross-check output with staking-deposit-cli (default: false)
+   --deposit-cli-path value        Path to staking-deposit-cli binary (default: "deposit")
+   --help, -h                      show help
+   --version, -v                   print the version
+```
+
+Exit code: 0
 
 ---
 
