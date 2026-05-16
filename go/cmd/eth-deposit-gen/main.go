@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -37,6 +38,16 @@ var errBLSInit = errors.New("bls init failed")
 // CLI callers; this sentinel protects non-CLI callers (integration tests, future
 // programmatic APIs) and maps to exit code 2.
 var errMainnetAckRequired = errors.New("mainnet requires explicit acknowledgement (set Config.MainnetAck = true)")
+
+// ErrDepositCLINotFound is returned when --verify-with-deposit-cli is set but the
+// binary named by --deposit-cli-path cannot be found in PATH via exec.LookPath.
+// Maps to exit code 2 (user / configuration error: binary not installed).
+var ErrDepositCLINotFound = errors.New("deposit CLI binary not found")
+
+// ErrDepositCLIFailed is returned when the external staking-deposit-cli process
+// exits with a non-zero status during post-generation verification.
+// Maps to exit code 3 (the verification step is a crypto/correctness check).
+var ErrDepositCLIFailed = errors.New("deposit CLI verification failed")
 
 // defaultWithdrawalCreds returns the 32-byte withdrawal credentials for v1.
 // Type 0x00 prefix = BLS withdrawal type. Per the architecture doc this is
@@ -97,6 +108,34 @@ type deps struct {
 	// logger receives structured debug messages. Set to a discarding logger to
 	// suppress all output; set to a text/JSON handler to enable debug logging.
 	logger *slog.Logger
+
+	// verifyDepositCLI is called after a successful write when cfg.VerifyWithDepositCLI
+	// is true. The production implementation shells out to exec.Command; tests inject
+	// a stub that returns a fixed error or nil without spawning any process.
+	//
+	// Invocation: <cliPath> verify --input-file <outputPath>
+	// This matches the staking-deposit-cli >= 2.7.0 verify subcommand.
+	verifyDepositCLI func(ctx context.Context, cliPath, outputPath string) error
+}
+
+// runDepositCLIVerify is the production implementation of the verifyDepositCLI dep.
+// It first probes whether the binary is available via exec.LookPath; if not found
+// and the flag was set, it returns ErrDepositCLINotFound (exit code 2). If the
+// external process exits non-zero, it returns ErrDepositCLIFailed (exit code 3)
+// with the combined stdout+stderr included in the error message.
+//
+// Invocation: <cliPath> verify --input-file <outputPath>
+// This matches staking-deposit-cli >= 2.7.0. See Issue #18 for rationale.
+func runDepositCLIVerify(ctx context.Context, cliPath, outputPath string) error {
+	if _, err := exec.LookPath(cliPath); err != nil {
+		return fmt.Errorf("%w: %q not found in PATH: %v", ErrDepositCLINotFound, cliPath, err)
+	}
+	cmd := exec.CommandContext(ctx, cliPath, "verify", "--input-file", outputPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrDepositCLIFailed, string(out))
+	}
+	return nil
 }
 
 // buildLogger constructs a *slog.Logger based on the verbose and jsonLogs flags.
@@ -123,14 +162,15 @@ func buildLogger(verbose, jsonLogs bool, w io.Writer) *slog.Logger {
 // overrides it with the cfg-configured logger before calling runWithDeps.
 func productionDeps() deps {
 	return deps{
-		initBLS:    bls.Init,
-		scanner:    keystore.ScanDir,
-		loader:     keystore.NewLoader(),
-		newSigner:  bls.NewSigner,
-		verifier:   bls.DefaultVerifier(),
-		writer:     output.NewFSWriter(),
-		summaryOut: os.Stderr,
-		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		initBLS:          bls.Init,
+		scanner:          keystore.ScanDir,
+		loader:           keystore.NewLoader(),
+		newSigner:        bls.NewSigner,
+		verifier:         bls.DefaultVerifier(),
+		writer:           output.NewFSWriter(),
+		summaryOut:       os.Stderr,
+		logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		verifyDepositCLI: runDepositCLIVerify,
 	}
 }
 
@@ -307,6 +347,18 @@ func runWithDeps(ctx context.Context, cfg cli.Config, d deps) error {
 	}
 	log.Debug("output: written", "path", path, "sha256", sum)
 
+	// Step 6: optional cross-check with the user's installed staking-deposit-cli.
+	// Skipped in dry-run mode because there is no output file on disk to verify
+	// (DryRunWriter returns path="" and the JSON was written to stdout instead).
+	if cfg.VerifyWithDepositCLI && !cfg.DryRun {
+		log.Debug("verify: running deposit CLI cross-check", "cli_path", cfg.DepositCLIPath, "output_path", path)
+		if err := d.verifyDepositCLI(ctx, cfg.DepositCLIPath, path); err != nil {
+			log.Debug("verify: deposit CLI check failed", "error", err)
+			return err
+		}
+		log.Debug("verify: deposit CLI cross-check passed")
+	}
+
 	// Success: print the summary line.
 	printSummary(d.summaryOut, path, sum, len(entries), cfg.Network)
 	return nil
@@ -358,7 +410,8 @@ func exitCodeFor(err error) int {
 		errors.Is(err, keystore.ErrEnvVarEmpty) ||
 		errors.Is(err, keystore.ErrKeystoreNotFound) ||
 		errors.Is(err, deposit.ErrPubkeyMismatch) ||
-		errors.Is(err, errMainnetAckRequired) {
+		errors.Is(err, errMainnetAckRequired) ||
+		errors.Is(err, ErrDepositCLINotFound) {
 		return 2
 	}
 	// CLI validation errors from urfave/cli (ExitCoder with code 2).
@@ -367,10 +420,11 @@ func exitCodeFor(err error) int {
 		return 2
 	}
 
-	// Exit code 3: crypto / signer errors.
+	// Exit code 3: crypto / signer errors and external verification failures.
 	if errors.Is(err, keystore.ErrWrongPassphrase) ||
 		errors.Is(err, deposit.ErrSelfVerifyFailed) ||
-		errors.Is(err, errBLSInit) {
+		errors.Is(err, errBLSInit) ||
+		errors.Is(err, ErrDepositCLIFailed) {
 		return 3
 	}
 

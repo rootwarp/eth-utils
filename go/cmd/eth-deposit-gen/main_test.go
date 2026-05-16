@@ -127,6 +127,9 @@ func makeTestDeps(summaryBuf *bytes.Buffer, writerOverride output.Writer) deps {
 		writer:     w,
 		summaryOut: summaryBuf,
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		// verifyDepositCLI defaults to nil; tests that need it set it explicitly.
+		// When cfg.VerifyWithDepositCLI=false (the default in makeCfg()), it is never called.
+		verifyDepositCLI: nil,
 	}
 }
 
@@ -340,6 +343,14 @@ func TestExitCodeFor_ErrorCodes(t *testing.T) {
 		{"ErrPubkeyMismatch", deposit.ErrPubkeyMismatch, 2},
 		{"ErrPubkeyMismatch wrapped", fmt.Errorf("wrap: %w", deposit.ErrPubkeyMismatch), 2},
 		{"ExitCoder code 2", exitCoder2, 2},
+
+		// --- exit code 2: deposit CLI not found ---
+		{"ErrDepositCLINotFound", ErrDepositCLINotFound, 2},
+		{"ErrDepositCLINotFound wrapped", fmt.Errorf("wrap: %w", ErrDepositCLINotFound), 2},
+
+		// --- exit code 3: deposit CLI failed ---
+		{"ErrDepositCLIFailed", ErrDepositCLIFailed, 3},
+		{"ErrDepositCLIFailed wrapped", fmt.Errorf("wrap: %w", ErrDepositCLIFailed), 3},
 
 		// --- exit code 3 ---
 		{"ErrWrongPassphrase", keystore.ErrWrongPassphrase, 3},
@@ -1093,6 +1104,135 @@ func BenchmarkRunWithDeps_Parallel(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// TestVerifyDepositCLI — tests for the --verify-with-deposit-cli feature (Issue #18)
+// ---------------------------------------------------------------------------
+
+// TestVerifyDepositCLI_FlagNotSet_NeverCalled verifies that when VerifyWithDepositCLI
+// is false (default), the verifyDepositCLI function is never invoked.
+// The stub panics if called so a mistaken call fails loudly.
+func TestVerifyDepositCLI_FlagNotSet_NeverCalled(t *testing.T) {
+	var summaryBuf bytes.Buffer
+	d := makeTestDeps(&summaryBuf, nil)
+	// Inject a stub that panics if called — guards against accidental invocation.
+	d.verifyDepositCLI = func(_ context.Context, _, _ string) error {
+		panic("verifyDepositCLI must not be called when VerifyWithDepositCLI=false")
+	}
+
+	cfg := makeCfg()
+	cfg.VerifyWithDepositCLI = false // explicit false (the default)
+
+	err := runWithDeps(context.Background(), cfg, d)
+	if err != nil {
+		t.Fatalf("runWithDeps() unexpected error: %v", err)
+	}
+}
+
+// TestVerifyDepositCLI_FlagSet_StubReturnsNil verifies that when VerifyWithDepositCLI
+// is true and the stub returns nil, the pipeline succeeds with no error.
+func TestVerifyDepositCLI_FlagSet_StubReturnsNil(t *testing.T) {
+	var summaryBuf bytes.Buffer
+	d := makeTestDeps(&summaryBuf, nil)
+
+	called := false
+	d.verifyDepositCLI = func(_ context.Context, _, _ string) error {
+		called = true
+		return nil
+	}
+
+	cfg := makeCfg()
+	cfg.VerifyWithDepositCLI = true
+	cfg.DepositCLIPath = "deposit"
+
+	err := runWithDeps(context.Background(), cfg, d)
+	if err != nil {
+		t.Fatalf("runWithDeps() unexpected error: %v", err)
+	}
+	if !called {
+		t.Error("verifyDepositCLI stub was not called, want it called when VerifyWithDepositCLI=true")
+	}
+	if code := exitCodeFor(err); code != 0 {
+		t.Errorf("exitCodeFor(nil) = %d, want 0", code)
+	}
+}
+
+// TestVerifyDepositCLI_FlagSet_StubReturnsNotFound verifies that when
+// VerifyWithDepositCLI is true and the stub returns ErrDepositCLINotFound,
+// the pipeline returns exit code 2.
+func TestVerifyDepositCLI_FlagSet_StubReturnsNotFound(t *testing.T) {
+	var summaryBuf bytes.Buffer
+	d := makeTestDeps(&summaryBuf, nil)
+
+	d.verifyDepositCLI = func(_ context.Context, _, _ string) error {
+		return fmt.Errorf("%w: %q not found in PATH", ErrDepositCLINotFound, "deposit")
+	}
+
+	cfg := makeCfg()
+	cfg.VerifyWithDepositCLI = true
+	cfg.DepositCLIPath = "deposit"
+
+	err := runWithDeps(context.Background(), cfg, d)
+	if err == nil {
+		t.Fatal("runWithDeps() returned nil, want ErrDepositCLINotFound")
+	}
+	if !errors.Is(err, ErrDepositCLINotFound) {
+		t.Errorf("error = %v, want wrapped ErrDepositCLINotFound", err)
+	}
+	if code := exitCodeFor(err); code != 2 {
+		t.Errorf("exitCodeFor(ErrDepositCLINotFound) = %d, want 2", code)
+	}
+}
+
+// TestVerifyDepositCLI_FlagSet_StubReturnsFailed verifies that when
+// VerifyWithDepositCLI is true and the stub returns ErrDepositCLIFailed,
+// the pipeline returns exit code 3.
+func TestVerifyDepositCLI_FlagSet_StubReturnsFailed(t *testing.T) {
+	var summaryBuf bytes.Buffer
+	d := makeTestDeps(&summaryBuf, nil)
+
+	d.verifyDepositCLI = func(_ context.Context, _, _ string) error {
+		return fmt.Errorf("%w: deposit exited with code 1: invalid data", ErrDepositCLIFailed)
+	}
+
+	cfg := makeCfg()
+	cfg.VerifyWithDepositCLI = true
+	cfg.DepositCLIPath = "deposit"
+
+	err := runWithDeps(context.Background(), cfg, d)
+	if err == nil {
+		t.Fatal("runWithDeps() returned nil, want ErrDepositCLIFailed")
+	}
+	if !errors.Is(err, ErrDepositCLIFailed) {
+		t.Errorf("error = %v, want wrapped ErrDepositCLIFailed", err)
+	}
+	if code := exitCodeFor(err); code != 3 {
+		t.Errorf("exitCodeFor(ErrDepositCLIFailed) = %d, want 3", code)
+	}
+}
+
+// TestVerifyDepositCLI_DryRun_NeverCalled verifies that the verify step is
+// skipped when DryRun=true even when VerifyWithDepositCLI=true, because the
+// output path is empty and there is no file to pass to the external CLI.
+func TestVerifyDepositCLI_DryRun_NeverCalled(t *testing.T) {
+	var stdoutBuf bytes.Buffer
+	var summaryBuf bytes.Buffer
+
+	d := makeTestDeps(&summaryBuf, output.NewDryRunWriter(&stdoutBuf))
+	d.verifyDepositCLI = func(_ context.Context, _, _ string) error {
+		panic("verifyDepositCLI must not be called in dry-run mode")
+	}
+
+	cfg := makeCfg()
+	cfg.DryRun = true
+	cfg.VerifyWithDepositCLI = true
+	cfg.DepositCLIPath = "deposit"
+
+	err := runWithDeps(context.Background(), cfg, d)
+	if err != nil {
+		t.Fatalf("runWithDeps(dry-run) unexpected error: %v", err)
+	}
+}
+
 // TestNoSlogImportInSigningPackages — AC #3
 // Asserts that internal/ssz, internal/bls, and internal/deposit do not
 // import log/slog. These packages are in the signing path and must remain

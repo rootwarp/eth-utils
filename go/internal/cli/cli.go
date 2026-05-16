@@ -61,6 +61,17 @@ type Config struct {
 	// pubkeys. Valid range: 1 to runtime.NumCPU()*4. Default is 1 (sequential).
 	// Values <= 0 or > runtime.NumCPU()*4 are rejected with a usage error (exit code 2).
 	Parallel int
+	// VerifyWithDepositCLI enables optional post-generation cross-check by shelling
+	// out to the user's installed staking-deposit-cli. Off by default; opt-in via
+	// --verify-with-deposit-cli. Skipped when DryRun is true (no output file exists).
+	VerifyWithDepositCLI bool
+
+	// DepositCLIPath is the name or path of the staking-deposit-cli binary to invoke
+	// for post-generation verification. Defaults to "deposit". Only used when
+	// VerifyWithDepositCLI is true.
+	//
+	// Minimum supported staking-deposit-cli version: 2.7.0 (same as CLIVersion in main.go).
+	DepositCLIPath string
 }
 
 // NewApp constructs and returns a configured *cli.App. The run callback receives
@@ -153,6 +164,18 @@ OPTIONS:
 			Usage: fmt.Sprintf("Number of concurrent signing workers (1–%d); values ≤0 or >%d are rejected", runtime.NumCPU()*4, runtime.NumCPU()*4),
 			Value: 1,
 		},
+		&ucli.BoolFlag{
+			Name: "verify-with-deposit-cli",
+			Usage: "After writing the deposit JSON, run the installed staking-deposit-cli to cross-check " +
+				"the output file (requires staking-deposit-cli >= 2.7.0; see --deposit-cli-path). " +
+				"Skipped in --dry-run mode. Off by default.",
+		},
+		&ucli.StringFlag{
+			Name:  "deposit-cli-path",
+			Value: "deposit",
+			Usage: "Name or absolute path of the staking-deposit-cli binary used for --verify-with-deposit-cli " +
+				"(minimum supported version: 2.7.0). Defaults to \"deposit\" (looked up in PATH).",
+		},
 	}
 
 	app.Action = func(c *ucli.Context) error {
@@ -201,16 +224,18 @@ OPTIONS:
 		}
 
 		cfg := Config{
-			KeystoreDir:   keystoreDir,
-			Pubkeys:       pubkeys,
-			Network:       net,
-			OutputDir:     outputDir,
-			PassphraseEnv: c.String("passphrase-env"),
-			MainnetAck:    mainnetAck,
-			DryRun:        c.Bool("dry-run"),
-			Verbose:       c.Bool("verbose"),
-			JSONLogs:      c.Bool("json-logs"),
-			Parallel:      parallel,
+			KeystoreDir:          keystoreDir,
+			Pubkeys:              pubkeys,
+			Network:              net,
+			OutputDir:            outputDir,
+			PassphraseEnv:        c.String("passphrase-env"),
+			MainnetAck:           mainnetAck,
+			DryRun:               c.Bool("dry-run"),
+			Verbose:              c.Bool("verbose"),
+			JSONLogs:             c.Bool("json-logs"),
+			Parallel:             parallel,
+			VerifyWithDepositCLI: c.Bool("verify-with-deposit-cli"),
+			DepositCLIPath:       c.String("deposit-cli-path"),
 		}
 
 		// 5. Print confirmation banner to stderr before invoking run.
