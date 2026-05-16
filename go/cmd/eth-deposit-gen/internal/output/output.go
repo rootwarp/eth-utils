@@ -129,10 +129,15 @@ func (w *fsWriter) Write(_ context.Context, dir string, entries []deposit.Entry,
 	}
 
 	// Ensure cleanup on any failure path before rename.
+	// fileClosed tracks whether f was already closed so the defer does not
+	// double-close on the rename-failure path.
 	committed := false
+	fileClosed := false
 	defer func() {
 		if !committed {
-			f.Close()         //nolint:errcheck
+			if !fileClosed {
+				f.Close() //nolint:errcheck
+			}
 			os.Remove(tmpPath) //nolint:errcheck
 		}
 	}()
@@ -148,6 +153,7 @@ func (w *fsWriter) Write(_ context.Context, dir string, entries []deposit.Entry,
 	if err := f.Close(); err != nil {
 		return "", "", fmt.Errorf("output: close tmp file: %w", err)
 	}
+	fileClosed = true
 
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		return "", "", fmt.Errorf("output: rename tmp to final: %w", err)
