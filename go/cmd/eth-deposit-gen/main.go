@@ -98,16 +98,29 @@ type deps struct {
 	logger *slog.Logger
 }
 
-// productionDeps returns the deps wired with all real implementations.
-// Debug logging is enabled when the ETH_DEPOSIT_GEN_DEBUG environment variable
-// is non-empty; otherwise all log output is discarded.
-func productionDeps() deps {
-	var logger *slog.Logger
-	if os.Getenv("ETH_DEPOSIT_GEN_DEBUG") != "" {
-		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	} else {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+// buildLogger constructs a *slog.Logger based on the verbose and jsonLogs flags.
+// Output is always written to w (os.Stderr in production, a buffer in tests).
+// When verbose is true, the handler level is set to Debug; otherwise Info.
+// When jsonLogs is true, slog.NewJSONHandler is used; otherwise slog.NewTextHandler.
+func buildLogger(verbose, jsonLogs bool, w io.Writer) *slog.Logger {
+	level := slog.LevelInfo
+	if verbose {
+		level = slog.LevelDebug
 	}
+	opts := &slog.HandlerOptions{Level: level}
+	var h slog.Handler
+	if jsonLogs {
+		h = slog.NewJSONHandler(w, opts)
+	} else {
+		h = slog.NewTextHandler(w, opts)
+	}
+	return slog.New(h)
+}
+
+// productionDeps returns the deps wired with all real implementations.
+// The logger field is intentionally set to a discarding logger here; run()
+// overrides it with the cfg-configured logger before calling runWithDeps.
+func productionDeps() deps {
 	return deps{
 		initBLS:    bls.Init,
 		scanner:    keystore.ScanDir,
@@ -116,7 +129,7 @@ func productionDeps() deps {
 		verifier:   bls.DefaultVerifier(),
 		writer:     output.NewFSWriter(),
 		summaryOut: os.Stderr,
-		logger:     logger,
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
 
@@ -234,12 +247,12 @@ func runWithDeps(ctx context.Context, cfg cli.Config, d deps) error {
 }
 
 // run is the urfave/cli action function. It delegates to runWithDeps with
-// the production dependency set. When cfg.DryRun is true, the writer is
-// swapped for a DryRunWriter that prints JSON to stdout; productionDeps()
-// always starts with an FSWriter, and run() overrides it here.
+// the production dependency set. The writer and logger are configured here
+// from cfg so that productionDeps() remains free of flag knowledge.
 func run(ctx context.Context, cfg cli.Config) error {
 	d := productionDeps()
 	d.writer = pickWriter(cfg, os.Stdout)
+	d.logger = buildLogger(cfg.Verbose, cfg.JSONLogs, os.Stderr)
 	return runWithDeps(ctx, cfg, d)
 }
 

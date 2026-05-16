@@ -742,7 +742,6 @@ func TestDryRunFlag(t *testing.T) {
 			"--pubkeys", "0x" + validPubkey,
 			"--network", "hoodi",
 			"--output-dir", dir,
-			// intentionally omitting --dry-run
 		}
 		cfg, _, called, err := runApp(t, args)
 		if err != nil {
@@ -773,6 +772,98 @@ func TestDryRunFlag(t *testing.T) {
 		}
 		if !cfg.DryRun {
 			t.Errorf("DryRun = false, want true when --dry-run is set")
+		}
+	})
+}
+
+// TestVerboseFlag verifies that --verbose is accepted, defaults to false, and is
+// propagated correctly in Config.
+func TestVerboseFlag(t *testing.T) {
+	dir := t.TempDir()
+	ksDir := t.TempDir()
+
+	t.Run("defaults_to_false", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if cfg.Verbose {
+			t.Error("Verbose = true, want false by default")
+		}
+	})
+
+	t.Run("set_to_true", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+			"--verbose",
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if !cfg.Verbose {
+			t.Error("Verbose = false, want true when --verbose is passed")
+		}
+	})
+}
+
+// TestJSONLogsFlag verifies that --json-logs is accepted, defaults to false, and is
+// propagated correctly in Config.
+func TestJSONLogsFlag(t *testing.T) {
+	dir := t.TempDir()
+	ksDir := t.TempDir()
+
+	t.Run("defaults_to_false", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if cfg.JSONLogs {
+			t.Error("JSONLogs = true, want false by default")
+		}
+	})
+
+	t.Run("set_to_true", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+			"--json-logs",
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if !cfg.JSONLogs {
+			t.Error("JSONLogs = false, want true when --json-logs is passed")
 		}
 	})
 }
