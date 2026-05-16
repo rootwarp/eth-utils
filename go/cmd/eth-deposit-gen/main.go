@@ -173,6 +173,7 @@ func exitCodeFor(err error) int {
 	if errors.Is(err, keystore.ErrKeystoreMissing) ||
 		errors.Is(err, keystore.ErrKeystoreMalformed) ||
 		errors.Is(err, keystore.ErrKeystoreVersion) ||
+		errors.Is(err, keystore.ErrEnvVarEmpty) ||
 		errors.Is(err, network.ErrMainnetNotEnabled) ||
 		errors.Is(err, deposit.ErrPubkeyMismatch) {
 		return 2
