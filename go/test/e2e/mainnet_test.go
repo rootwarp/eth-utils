@@ -226,6 +226,7 @@ func TestMainnetBanner(t *testing.T) {
 	args := []string{
 		"eth-deposit-gen",
 		"--network", "mainnet",
+		"--i-understand-this-is-mainnet",
 		"--validator-key-path", mainnetTestdataDir + "/keystore.json",
 		"--pubkeys", pubkeyHex,
 		"--output-dir", t.TempDir(),
@@ -240,11 +241,14 @@ func TestMainnetBanner(t *testing.T) {
 	}
 
 	banner := bannerBuf.String()
-	if !strings.Contains(banner, "mainnet") {
-		t.Errorf("banner does not contain %q; got %q", "mainnet", banner)
+	// Issue #14: the banner uppercases "MAINNET" as an additional visual safety
+	// cue. We check for the case-insensitive presence of "mainnet" and the exact
+	// "MAINNET" token that the banner format produces.
+	if !strings.Contains(strings.ToLower(banner), "mainnet") {
+		t.Errorf("banner does not contain %q (case-insensitive); got %q", "mainnet", banner)
 	}
-	if !strings.Contains(banner, "network=mainnet") {
-		t.Errorf("banner does not contain %q; got %q", "network=mainnet", banner)
+	if !strings.Contains(banner, "network=MAINNET") {
+		t.Errorf("banner does not contain %q; got %q", "network=MAINNET", banner)
 	}
 }
 
