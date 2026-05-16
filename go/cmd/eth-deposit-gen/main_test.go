@@ -1396,6 +1396,33 @@ func TestProgress_JSONLogs_EmitsSlogNotCarriageReturn(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// TestVersionFlag — verifies --version flag is wired and exits 0
+// ---------------------------------------------------------------------------
+
+func TestVersionFlag(t *testing.T) {
+	// Override the global version var so the output is deterministic.
+	orig := version
+	version = "test-version"
+	defer func() { version = orig }()
+
+	var buf bytes.Buffer
+	app := cli.NewApp(func(_ context.Context, _ cli.Config) error { return nil })
+	app.Version = version
+	ucli.VersionPrinter = func(c *ucli.Context) {
+		fmt.Fprintf(&buf, "%s version %s\n", c.App.Name, c.App.Version)
+	}
+
+	err := app.Run([]string{"eth-deposit-gen", "--version"})
+	if err != nil {
+		t.Fatalf("--version returned error: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "test-version") {
+		t.Errorf("--version output %q does not contain version string %q", got, "test-version")
+	}
+}
+
 // TestNoSlogImportInSigningPackages — AC #3
 // Asserts that internal/ssz, internal/bls, and internal/deposit do not
 // import log/slog. These packages are in the signing path and must remain

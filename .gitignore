@@ -1,6 +1,5 @@
-# Build outputs
-dist/*
-!dist/.gitkeep
+# Build outputs — goreleaser writes to dist/, do not track generated artifacts
+dist/
 
 # Go
 go/go.work.sum

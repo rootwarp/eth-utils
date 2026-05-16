@@ -1,0 +1,123 @@
+# .goreleaser.yaml — Release configuration for eth-deposit-gen
+#
+# CGO strategy: zig cc cross-compilation
+# ----------------------------------------
+# eth-deposit-gen depends on github.com/herumi/bls-eth-go-binary, which ships
+# prebuilt static archives (.a) for each target OS/arch inside the Go module
+# (bls/lib/{darwin,linux}/{amd64,arm64}/libbls384_256.a). CGO_ENABLED=1 is
+# therefore required; the binary cannot be built with pure Go.
+#
+# For LOCAL snapshot builds: zig cc is used as the cross-compiler, allowing
+# all four targets to be built on a single macOS host. Zig 0.16 ships
+# prebuilt musl-based toolchains; no pinning or zig-forge required.
+#
+# For CI RELEASE builds (#21): the release workflow uses a native-runner
+# matrix (macos-latest for darwin builds, ubuntu-latest for linux builds)
+# with the host C compiler. This avoids any zig dependency in CI and uses
+# the same native libc as the target OS. See docs/validation/release-strategy.md
+# for the full rationale.
+#
+# Windows: excluded. herumi/bls-eth-go-binary ships a windows/amd64 .a but
+# there is no Windows CI runner configured and the operator use case is
+# Linux/macOS servers only.
+
+version: 2
+
+project_name: eth-deposit-gen
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+
+builds:
+  # darwin builds — compiled natively on macOS runners in CI; locally with host cc.
+  - id: darwin
+    main: ./cmd/eth-deposit-gen
+    dir: go
+    binary: eth-deposit-gen
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  # linux builds — natively on ubuntu runners in CI; via zig cc locally.
+  - id: linux-amd64
+    main: ./cmd/eth-deposit-gen
+    dir: go
+    binary: eth-deposit-gen
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=zig cc -target x86_64-linux-musl
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: linux-arm64
+    main: ./cmd/eth-deposit-gen
+    dir: go
+    binary: eth-deposit-gen
+    goos:
+      - linux
+    goarch:
+      - arm64
+    env:
+      - CGO_ENABLED=1
+      - CC=zig cc -target aarch64-linux-musl
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    ids:
+      - darwin
+      - linux-amd64
+      - linux-arm64
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ .Tag }}-snapshot"
+
+release:
+  draft: false
+  prerelease: auto
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

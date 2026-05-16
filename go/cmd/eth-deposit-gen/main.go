@@ -30,6 +30,14 @@ import (
 // test fixtures. Bump only after golden-file re-validation passes.
 const CLIVersion = "2.7.0"
 
+// version, commit, and date are set at build time via -ldflags.
+// Default values are used for local/dev builds.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 // errBLSInit is a sentinel used to detect bls.Init() failures in exitCodeFor.
 // herumi errors have no exported sentinel, so we wrap them with this.
 var errBLSInit = errors.New("bls init failed")
@@ -492,6 +500,11 @@ func main() {
 	defer stop()
 
 	app := cli.NewApp(run)
+	app.Version = version
+	ucli.VersionPrinter = func(c *ucli.Context) {
+		fmt.Fprintf(c.App.Writer, "%s version %s (commit=%s, built=%s)\n",
+			c.App.Name, c.App.Version, commit, date)
+	}
 	if err := app.RunContext(ctx, os.Args); err != nil {
 		os.Exit(exitCodeFor(err))
 	}
