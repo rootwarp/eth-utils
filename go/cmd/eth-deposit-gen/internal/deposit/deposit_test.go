@@ -405,3 +405,47 @@ func TestGenerate_VerifyError(t *testing.T) {
 		t.Errorf("Generate() returned non-nil entries on verify error: %v", entries)
 	}
 }
+
+func TestGenerate_NetworkMismatch(t *testing.T) {
+	params := hoodiParams()
+	pk := makePubkey(0x01)
+	signer := &fakeSigner{pubkey: pk}
+	verifier := &fakeVerifier{ok: true}
+	gen := NewGenerator(signer, verifier, params)
+
+	// Pass mainnet in the request but the generator is for hoodi.
+	req := Request{
+		Network:           network.Mainnet,
+		Pubkeys:           [][48]byte{pk},
+		AmountGwei:        32_000_000_000,
+		DepositCLIVersion: "2.7.0",
+	}
+	entries, err := gen.Generate(context.Background(), req)
+	if err == nil {
+		t.Fatal("Generate() returned nil error, want network mismatch error")
+	}
+	if entries != nil {
+		t.Errorf("Generate() returned non-nil entries on network mismatch")
+	}
+}
+
+func TestGenerate_EmptyPubkeys(t *testing.T) {
+	params := hoodiParams()
+	signer := &fakeSigner{}
+	verifier := &fakeVerifier{ok: true}
+	gen := NewGenerator(signer, verifier, params)
+
+	req := Request{
+		Network:           network.Hoodi,
+		Pubkeys:           nil,
+		AmountGwei:        32_000_000_000,
+		DepositCLIVersion: "2.7.0",
+	}
+	entries, err := gen.Generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Generate() with no pubkeys returned error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Generate() with no pubkeys returned %d entries, want 0", len(entries))
+	}
+}

@@ -96,6 +96,13 @@ func NewGenerator(s bls.Signer, v bls.Verifier, params network.Params) *Generato
 // On any error — pubkey mismatch, sign error, verify failure, or context
 // cancellation — it returns (nil, err) with no partial output.
 func (g *Generator) Generate(ctx context.Context, req Request) ([]Entry, error) {
+	// Guard against silent misconfiguration: the request's stated network must
+	// match the network this Generator was constructed for.
+	if req.Network != g.params.Name {
+		return nil, fmt.Errorf("network mismatch: request %q but generator is configured for %q",
+			req.Network, g.params.Name)
+	}
+
 	entries := make([]Entry, 0, len(req.Pubkeys))
 
 	for i, pk := range req.Pubkeys {
@@ -139,7 +146,7 @@ func (g *Generator) Generate(ctx context.Context, req Request) ([]Entry, error) 
 			return nil, fmt.Errorf("%w: pubkey[%d]=0x%x", ErrSelfVerifyFailed, i, pk[:])
 		}
 
-		// Step 8-9: build deposit data and compute its hash tree root.
+		// Step 7-8: build deposit data and compute its hash tree root.
 		data := ssz.DepositData{
 			Pubkey:                pk,
 			WithdrawalCredentials: req.WithdrawalCredentials,
@@ -148,7 +155,7 @@ func (g *Generator) Generate(ctx context.Context, req Request) ([]Entry, error) 
 		}
 		dataRoot := data.HashTreeRoot()
 
-		// Step 10: emit the completed entry.
+		// Step 9: emit the completed entry.
 		entries = append(entries, Entry{
 			Pubkey:                pk,
 			WithdrawalCredentials: req.WithdrawalCredentials,
