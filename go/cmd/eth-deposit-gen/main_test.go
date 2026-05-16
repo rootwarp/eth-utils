@@ -860,6 +860,239 @@ func TestRunWithDeps_DryRun_VerifyFailureAbortsWithSameExitCode(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers for multi-pubkey parallel tests
+// ---------------------------------------------------------------------------
+
+// makeMultiPubkeyDeps builds a deps set that can handle N distinct pubkeys.
+// Each pubkey[i] has pubkey[i][0] == byte(i+1) and a matching fakeSigner.
+// The loader uses the keystore path (which encodes the pubkey index) to return
+// the correct key.  The newSigner selects the correct signer by secret[0].
+func makeMultiPubkeyDeps(summaryBuf *bytes.Buffer, pks [][48]byte) deps {
+	// Build the scanner index: pkHex → "/fake/<i>.json".
+	idx := make(keystore.DirectoryIndex, len(pks))
+	signers := make(map[byte]*fakeSigner, len(pks))
+	for i, pk := range pks {
+		pkHex := fmt.Sprintf("%x", pk[:])
+		idx[pkHex] = fmt.Sprintf("/fake/%d.json", i)
+		// Give each signer a distinct signature (sig[0] == pk[0]) so that a
+		// mis-routing bug (wrong sig for a pubkey) would be caught by the
+		// byte-equality assertion in TestRunWithDeps_Parallel.
+		s := &fakeSigner{pubkey: pk}
+		s.sig[0] = pk[0]
+		signers[pk[0]] = s
+	}
+
+	// loader: returns a key whose Secret[0] encodes which pubkey it is.
+	loaderFunc := func(_ context.Context, path string, _ keystore.PassphraseSource) (keystore.Key, error) {
+		// Parse the index from the path "/fake/<i>.json".
+		var idx int
+		fmt.Sscanf(path, "/fake/%d.json", &idx)
+		pk := pks[idx]
+		secret := make([]byte, 32)
+		secret[0] = pk[0] // encode which key this is
+		return keystore.Key{
+			Secret:    secret,
+			PubkeyHex: fmt.Sprintf("%x", pk[:]),
+		}, nil
+	}
+
+	// newSigner: looks up the signer by secret[0].
+	newSignerFunc := func(secret []byte) (bls.Signer, error) {
+		s, ok := signers[secret[0]]
+		if !ok {
+			return nil, fmt.Errorf("no signer for secret[0]=%d", secret[0])
+		}
+		return s, nil
+	}
+
+	return deps{
+		initBLS: func() error { return nil },
+		scanner: func(_ string) (keystore.DirectoryIndex, error) { return idx, nil },
+		loader: &funcLoader{fn: loaderFunc},
+		newSigner: newSignerFunc,
+		verifier:   &fakeVerifier{ok: true},
+		writer:     &fakeWriter{path: "/out/deposit_data-1.json", sha256hex: "cafebabe"},
+		summaryOut: summaryBuf,
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+}
+
+// funcLoader is a KeyLoader backed by a function, allowing path-aware loading.
+type funcLoader struct {
+	fn func(context.Context, string, keystore.PassphraseSource) (keystore.Key, error)
+}
+
+func (f *funcLoader) Load(ctx context.Context, path string, src keystore.PassphraseSource) (keystore.Key, error) {
+	return f.fn(ctx, path, src)
+}
+
+// make3Pubkeys returns 3 distinct 48-byte pubkeys. Each pubkey[i][0] == byte(i+1).
+func make3Pubkeys() [][48]byte {
+	pks := make([][48]byte, 3)
+	for i := range pks {
+		pks[i][0] = byte(i + 1)
+	}
+	return pks
+}
+
+// ---------------------------------------------------------------------------
+// TestRunWithDeps_Parallel — AC #7
+// Runs runWithDeps with the same 3-pubkey setup at Parallel=1, 2, and 3 and
+// asserts the three result slices are byte-for-byte equal (same entries in
+// same order).  Uses fakes — no real BLS needed.
+// ---------------------------------------------------------------------------
+
+func TestRunWithDeps_Parallel(t *testing.T) {
+	pks := make3Pubkeys()
+
+	baseCfg := cli.Config{
+		KeystoreDir: "/fake/keystores",
+		Pubkeys:     pks,
+		Network:     network.Hoodi,
+		OutputDir:   "/tmp",
+	}
+
+	// Run with each parallelism level and collect the written entries.
+	parallelisms := []int{1, 2, 3}
+	var allEntries [3][]deposit.Entry
+
+	for i, p := range parallelisms {
+		var summaryBuf bytes.Buffer
+		var captured []deposit.Entry
+
+		// Override the writer to capture entries passed to Write.
+		var writerFunc capturingWriterFunc = func(_ context.Context, _ string, entries []deposit.Entry, _ time.Time) (string, string, error) {
+			// Deep copy to avoid aliasing across runs.
+			captured = make([]deposit.Entry, len(entries))
+			copy(captured, entries)
+			return "/out/deposit_data.json", "cafebabe", nil
+		}
+
+		d := makeMultiPubkeyDeps(&summaryBuf, pks)
+		d.writer = writerFunc
+
+		cfg := baseCfg
+		cfg.Parallel = p
+
+		if err := runWithDeps(context.Background(), cfg, d); err != nil {
+			t.Fatalf("Parallel=%d: runWithDeps() error: %v", p, err)
+		}
+		allEntries[i] = captured
+	}
+
+	// Assert all three runs produced the same entries in the same order.
+	for i := 1; i < len(parallelisms); i++ {
+		if len(allEntries[i]) != len(allEntries[0]) {
+			t.Errorf("Parallel=%d: got %d entries, want %d", parallelisms[i], len(allEntries[i]), len(allEntries[0]))
+			continue
+		}
+		for j := range allEntries[0] {
+			if allEntries[i][j] != allEntries[0][j] {
+				t.Errorf("Parallel=%d: entry[%d] differs from Parallel=1 result\ngot:  %+v\nwant: %+v",
+					parallelisms[i], j, allEntries[i][j], allEntries[0][j])
+			}
+		}
+	}
+
+	// Assert order matches cfg.Pubkeys order (entry[i].Pubkey == pks[i]).
+	for j, e := range allEntries[0] {
+		if e.Pubkey != pks[j] {
+			t.Errorf("Parallel=1: entry[%d].Pubkey = %x, want %x (order not preserved)", j, e.Pubkey, pks[j])
+		}
+	}
+}
+
+// capturingWriterFunc implements output.Writer via a function.
+type capturingWriterFunc func(context.Context, string, []deposit.Entry, time.Time) (string, string, error)
+
+func (f capturingWriterFunc) Write(ctx context.Context, dir string, entries []deposit.Entry, t time.Time) (string, string, error) {
+	return f(ctx, dir, entries, t)
+}
+
+// ---------------------------------------------------------------------------
+// TestRunWithDeps_ParallelWorkerError — AC #5
+// Verifies that a worker error cancels remaining work and propagates the
+// first (non-Canceled) error.
+// ---------------------------------------------------------------------------
+
+func TestRunWithDeps_ParallelWorkerError(t *testing.T) {
+	pks := make3Pubkeys()
+
+	// Make the loader fail for the second pubkey (path "/fake/1.json").
+	loaderErr := fmt.Errorf("%w: /fake/1.json", keystore.ErrKeystoreMissing)
+	var failLoader funcLoader
+	failLoader.fn = func(_ context.Context, path string, _ keystore.PassphraseSource) (keystore.Key, error) {
+		if path == "/fake/1.json" {
+			return keystore.Key{}, loaderErr
+		}
+		var idx int
+		fmt.Sscanf(path, "/fake/%d.json", &idx)
+		pk := pks[idx]
+		secret := make([]byte, 32)
+		secret[0] = pk[0]
+		return keystore.Key{
+			Secret:    secret,
+			PubkeyHex: fmt.Sprintf("%x", pk[:]),
+		}, nil
+	}
+
+	var summaryBuf bytes.Buffer
+	d := makeMultiPubkeyDeps(&summaryBuf, pks)
+	d.loader = &failLoader
+
+	cfg := cli.Config{
+		KeystoreDir: "/fake/keystores",
+		Pubkeys:     pks,
+		Network:     network.Hoodi,
+		OutputDir:   "/tmp",
+		Parallel:    2,
+	}
+
+	err := runWithDeps(context.Background(), cfg, d)
+	if err == nil {
+		t.Fatal("runWithDeps() returned nil error, want worker error")
+	}
+	if !errors.Is(err, keystore.ErrKeystoreMissing) {
+		t.Errorf("error = %v, want ErrKeystoreMissing", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BenchmarkRunWithDeps_Parallel — AC #8
+// Shows that parallelism provides speedup (or at minimum compiles and runs).
+// ---------------------------------------------------------------------------
+
+func BenchmarkRunWithDeps_Parallel(b *testing.B) {
+	// Build 8 distinct pubkeys for the benchmark.
+	const nPubkeys = 8
+	pks := make([][48]byte, nPubkeys)
+	for i := range pks {
+		pks[i][0] = byte(i + 1)
+	}
+
+	for _, parallel := range []int{1, 2, 4} {
+		parallel := parallel // capture
+		b.Run(fmt.Sprintf("parallel=%d", parallel), func(b *testing.B) {
+			for range b.N {
+				var summaryBuf bytes.Buffer
+				d := makeMultiPubkeyDeps(&summaryBuf, pks)
+
+				cfg := cli.Config{
+					KeystoreDir: "/fake/keystores",
+					Pubkeys:     pks,
+					Network:     network.Hoodi,
+					OutputDir:   "/tmp",
+					Parallel:    parallel,
+				}
+				if err := runWithDeps(context.Background(), cfg, d); err != nil {
+					b.Fatalf("runWithDeps() error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestNoSlogImportInSigningPackages — AC #3
 // Asserts that internal/ssz, internal/bls, and internal/deposit do not
 // import log/slog. These packages are in the signing path and must remain

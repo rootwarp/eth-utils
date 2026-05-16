@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	ucli "github.com/urfave/cli/v2"
@@ -55,6 +56,11 @@ type Config struct {
 
 	// JSONLogs selects the JSON log handler when true. Default is false (text handler).
 	JSONLogs bool
+
+	// Parallel is the number of concurrent worker goroutines used to process
+	// pubkeys. Valid range: 1 to runtime.NumCPU()*4. Default is 1 (sequential).
+	// Values <= 0 or > runtime.NumCPU()*4 are rejected with a usage error (exit code 2).
+	Parallel int
 }
 
 // NewApp constructs and returns a configured *cli.App. The run callback receives
@@ -142,6 +148,11 @@ OPTIONS:
 			Name:  "json-logs",
 			Usage: "Emit logs as JSON objects instead of human-readable text",
 		},
+		&ucli.IntFlag{
+			Name:  "parallel",
+			Usage: fmt.Sprintf("Number of concurrent signing workers (1–%d); values ≤0 or >%d are rejected", runtime.NumCPU()*4, runtime.NumCPU()*4),
+			Value: 1,
+		},
 	}
 
 	app.Action = func(c *ucli.Context) error {
@@ -179,6 +190,16 @@ OPTIONS:
 			return ucli.Exit(fmt.Sprintf("--output-dir: %v", err), 2)
 		}
 
+		// 5. Validate --parallel: must be in [1, runtime.NumCPU()*4].
+		parallel := c.Int("parallel")
+		maxParallel := runtime.NumCPU() * 4
+		if parallel <= 0 {
+			return ucli.Exit(fmt.Sprintf("--parallel: value %d is invalid; must be >= 1", parallel), 2)
+		}
+		if parallel > maxParallel {
+			return ucli.Exit(fmt.Sprintf("--parallel: value %d exceeds maximum of %d (runtime.NumCPU()*4); reduce the value or it will oversubscribe the CPU", parallel, maxParallel), 2)
+		}
+
 		cfg := Config{
 			KeystoreDir:   keystoreDir,
 			Pubkeys:       pubkeys,
@@ -189,6 +210,7 @@ OPTIONS:
 			DryRun:        c.Bool("dry-run"),
 			Verbose:       c.Bool("verbose"),
 			JSONLogs:      c.Bool("json-logs"),
+			Parallel:      parallel,
 		}
 
 		// 5. Print confirmation banner to stderr before invoking run.
