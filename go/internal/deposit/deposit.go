@@ -13,9 +13,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/bls"
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/network"
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/ssz"
+	"github.com/rootwarp/eth-utils/go/internal/bls"
+	"github.com/rootwarp/eth-utils/go/internal/network"
+	"github.com/rootwarp/eth-utils/go/internal/ssz"
 )
 
 // ErrPubkeyMismatch is returned when the signer's public key does not match

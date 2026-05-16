@@ -13,8 +13,8 @@ import (
 
 	ucli "github.com/urfave/cli/v2"
 
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/bls"
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/network"
+	"github.com/rootwarp/eth-utils/go/internal/bls"
+	"github.com/rootwarp/eth-utils/go/internal/network"
 )
 
 // Config holds the validated, parsed inputs from the CLI flags.

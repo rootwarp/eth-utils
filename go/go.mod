@@ -1,4 +1,4 @@
-module github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen
+module github.com/rootwarp/eth-utils/go
 
 go 1.25.0
 

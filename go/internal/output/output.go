@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/deposit"
+	"github.com/rootwarp/eth-utils/go/internal/deposit"
 )
 
 // Writer serializes a slice of deposit entries to JSON and persists them.

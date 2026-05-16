@@ -4,9 +4,9 @@ dist/*
 
 # Go
 go/go.work.sum
-go/cmd/eth-deposit-gen/bin/
-go/cmd/eth-deposit-gen/eth-deposit-gen
-go/cmd/eth-deposit-gen/coverage*.out
+go/bin/
+go/eth-deposit-gen
+go/coverage*.out
 *.exe
 *.exe~
 *.dll

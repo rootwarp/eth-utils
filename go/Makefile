@@ -5,7 +5,7 @@ GOFLAGS := CGO_ENABLED=1
 
 ## build: compile the binary to bin/eth-deposit-gen
 build:
-	$(GOFLAGS) go build -o $(BIN) .
+	$(GOFLAGS) go build -o $(BIN) ./cmd/eth-deposit-gen
 
 ## test: run all tests (unit + integration)
 test:

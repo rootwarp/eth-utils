@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/bls"
+	"github.com/rootwarp/eth-utils/go/internal/bls"
 )
 
 // TestInitIdempotent verifies Init can be called more than once without error or panic.

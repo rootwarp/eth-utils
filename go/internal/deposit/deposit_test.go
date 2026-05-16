@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/network"
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/ssz"
+	"github.com/rootwarp/eth-utils/go/internal/network"
+	"github.com/rootwarp/eth-utils/go/internal/ssz"
 )
 
 // -----------------------------------------------------------------------------

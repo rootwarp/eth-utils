@@ -25,11 +25,11 @@ import (
 
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
 
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/bls"
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/deposit"
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/keystore"
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/network"
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/output"
+	"github.com/rootwarp/eth-utils/go/internal/bls"
+	"github.com/rootwarp/eth-utils/go/internal/deposit"
+	"github.com/rootwarp/eth-utils/go/internal/keystore"
+	"github.com/rootwarp/eth-utils/go/internal/network"
+	"github.com/rootwarp/eth-utils/go/internal/output"
 )
 
 // testdataDir is the path to the hoodi golden fixture directory relative to

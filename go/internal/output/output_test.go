@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/deposit"
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/network"
+	"github.com/rootwarp/eth-utils/go/internal/deposit"
+	"github.com/rootwarp/eth-utils/go/internal/network"
 )
 
 // testEntries returns 2 deposit.Entry values with known, deterministic test data.

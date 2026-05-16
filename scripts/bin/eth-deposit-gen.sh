@@ -30,7 +30,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MODULE_DIR="${REPO_ROOT}/go/cmd/eth-deposit-gen"
+MODULE_DIR="${REPO_ROOT}/go"
 BIN="${MODULE_DIR}/bin/eth-deposit-gen"
 
 # ── Build if binary is missing or stale ───────────────────────────────────────
@@ -46,7 +46,7 @@ needs_build() {
 
 if needs_build; then
   echo "Building eth-deposit-gen..." >&2
-  (cd "${MODULE_DIR}" && CGO_ENABLED=1 go build -o bin/eth-deposit-gen .) || {
+  (cd "${MODULE_DIR}" && CGO_ENABLED=1 go build -o bin/eth-deposit-gen ./cmd/eth-deposit-gen) || {
     echo "ERROR: build failed." >&2
     exit 1
   }

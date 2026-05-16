@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/keystore"
+	"github.com/rootwarp/eth-utils/go/internal/keystore"
 )
 
 const (

@@ -12,9 +12,9 @@ import (
 
 	ucli "github.com/urfave/cli/v2"
 
-	blspkg "github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/bls"
-	icli "github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/cli"
-	"github.com/rootwarp/eth-utils/go/cmd/eth-deposit-gen/internal/network"
+	blspkg "github.com/rootwarp/eth-utils/go/internal/bls"
+	icli "github.com/rootwarp/eth-utils/go/internal/cli"
+	"github.com/rootwarp/eth-utils/go/internal/network"
 )
 
 // validPubkey and validPubkey2 hold real BLS12-381 G1 compressed points, initialised
