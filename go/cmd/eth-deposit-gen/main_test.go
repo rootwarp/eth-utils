@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -562,12 +564,6 @@ func TestPickWriter_FSWriterWhenDryRunFalse(t *testing.T) {
 	if w == nil {
 		t.Fatal("pickWriter returned nil")
 	}
-	// FSWriter produces a non-empty path; DryRunWriter produces an empty path.
-	// We can't distinguish the concrete type without a type assertion, but we
-	// can verify behavior: FSWriter.Write returns an error when dir is not
-	// writable (we pass "/nonexistent"), while DryRunWriter writes to the
-	// provided io.Writer and returns ("", sha256, nil).
-	// Use a temp dir so FSWriter doesn't error on dir access.
 	dir := t.TempDir()
 	path, _, err := w.Write(context.Background(), dir, []deposit.Entry{}, time.Now())
 	if err != nil {
@@ -585,13 +581,165 @@ func TestPickWriter_DryRunWriterWhenDryRunTrue(t *testing.T) {
 	if w == nil {
 		t.Fatal("pickWriter returned nil")
 	}
-	// DryRunWriter.Write always returns ("", sha256, nil) — path is empty.
 	path, _, err := w.Write(context.Background(), "", []deposit.Entry{}, time.Now())
 	if err != nil {
 		t.Fatalf("DryRunWriter.Write: %v", err)
 	}
 	if path != "" {
 		t.Errorf("DryRunWriter returned non-empty path %q; want empty", path)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestRunWithDeps_NoSecretInLogs — secret-leak test (AC #6)
+// Runs the full pipeline with a verbose text logger and asserts the secret
+// sentinel bytes and passphrase never appear in any log line.
+// ---------------------------------------------------------------------------
+
+func TestRunWithDeps_NoSecretInLogs(t *testing.T) {
+	// Use a fixed 32-byte sentinel as the secret so it is easily searchable.
+	// We pre-compute the expected serialization forms before runWithDeps runs,
+	// because key.Zeroize() will zero-out the Secret slice in-place, which would
+	// also zero our sentinel if we share the same backing array.
+	sentinelOrig := bytes.Repeat([]byte{0x5A}, 32) // "ZZZZ..." — distinctive non-zero pattern
+	wantHex := fmt.Sprintf("%x", sentinelOrig)      // "5a5a5a...5a" — pre-compute before zeroize
+	wantDec := fmt.Sprintf("%v", sentinelOrig)      // "[90 90 90 ...]" — pre-compute before zeroize
+	wantRaw := make([]byte, len(sentinelOrig))
+	copy(wantRaw, sentinelOrig) // deep copy to survive zeroize
+
+	passphrase := "PassphraseSentinel99"
+	t.Setenv("TEST_PASSPHRASE", passphrase)
+
+	var logBuf bytes.Buffer
+	var summaryBuf bytes.Buffer
+
+	// Build a fake pubkey to match what the scanner index and loader will return.
+	var pk [48]byte
+	pk[0] = 0xAB
+	pkHex := fmt.Sprintf("%x", pk[:])
+
+	fakeSign := &fakeSigner{pubkey: pk}
+
+	idx := keystore.DirectoryIndex{pkHex: "/fake/keystore.json"}
+	fs := &fakeScanner{index: idx}
+
+	d := deps{
+		initBLS: func() error { return nil },
+		scanner: fs.scan,
+		loader: &fakeLoader{key: keystore.Key{
+			// Pass a copy so key.Zeroize() doesn't clobber sentinelOrig.
+			Secret:    sentinelOrig,
+			PubkeyHex: pkHex,
+		}},
+		newSigner: func(_ []byte) (bls.Signer, error) {
+			return fakeSign, nil
+		},
+		verifier:   &fakeVerifier{ok: true},
+		writer:     &fakeWriter{path: "/out/deposit_data-1.json", sha256hex: "cafebabe"},
+		summaryOut: &summaryBuf,
+		// Verbose text logger so all Debug lines are emitted to logBuf.
+		logger: slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	}
+
+	cfg := cli.Config{
+		KeystoreDir:   "/fake/keystores",
+		Pubkeys:       [][48]byte{pk},
+		Network:       network.Hoodi,
+		OutputDir:     "/tmp",
+		PassphraseEnv: "TEST_PASSPHRASE",
+	}
+
+	if err := runWithDeps(context.Background(), cfg, d); err != nil {
+		t.Fatalf("runWithDeps() unexpected error: %v", err)
+	}
+
+	logOutput := logBuf.Bytes()
+
+	// Assert that the secret sentinel never appears in any log output.
+	// We check three common serialization forms a logging framework might produce:
+	//   1. verbatim bytes (e.g. if logged as a binary or string attr)
+	//   2. hex encoding (e.g. fmt.Sprintf("%x", secret))
+	//   3. decimal slice rendering (e.g. fmt.Sprintf("%v", secret))
+	if bytes.Contains(logOutput, wantRaw) {
+		t.Errorf("secret sentinel (raw bytes) leaked into log output:\n%s", logOutput)
+	}
+	if bytes.Contains(logOutput, []byte(wantHex)) {
+		t.Errorf("secret sentinel (hex form %q) leaked into log output:\n%s", wantHex, logOutput)
+	}
+	if bytes.Contains(logOutput, []byte(wantDec)) {
+		t.Errorf("secret sentinel (decimal form %q) leaked into log output:\n%s", wantDec, logOutput)
+	}
+
+	// The passphrase string must never appear in any log output.
+	if bytes.Contains(logOutput, []byte(passphrase)) {
+		t.Errorf("passphrase leaked into log output:\n%s", logOutput)
+	}
+
+	// Sanity check: logs were actually emitted (verbose mode is active).
+	if len(logOutput) == 0 {
+		t.Error("no log output emitted — verbose mode may not be working")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestBuildLogger — verifies logger construction based on cfg flags (AC #2)
+// ---------------------------------------------------------------------------
+
+func TestBuildLogger_DefaultIsTextInfoLevel(t *testing.T) {
+	var buf bytes.Buffer
+	lg := buildLogger(false, false, &buf)
+
+	// At Info level, Debug messages should be suppressed.
+	lg.Debug("this-should-not-appear")
+	if buf.Len() > 0 {
+		t.Errorf("debug message appeared at Info level: %q", buf.String())
+	}
+
+	// Info messages should appear.
+	lg.Info("this-should-appear")
+	if !bytes.Contains(buf.Bytes(), []byte("this-should-appear")) {
+		t.Errorf("info message missing from text handler output: %q", buf.String())
+	}
+
+	// Output must be text (not JSON): presence of "=" key=value pairs.
+	if bytes.Contains(buf.Bytes(), []byte(`"msg"`)) {
+		t.Errorf("text handler produced JSON output: %q", buf.String())
+	}
+}
+
+func TestBuildLogger_VerboseEnablesDebug(t *testing.T) {
+	var buf bytes.Buffer
+	lg := buildLogger(true, false, &buf)
+
+	lg.Debug("debug-sentinel")
+	if !bytes.Contains(buf.Bytes(), []byte("debug-sentinel")) {
+		t.Errorf("debug message missing at verbose level: %q", buf.String())
+	}
+}
+
+func TestBuildLogger_JSONLogsEmitsJSON(t *testing.T) {
+	var buf bytes.Buffer
+	lg := buildLogger(false, true, &buf)
+
+	lg.Info("json-sentinel")
+	if !bytes.Contains(buf.Bytes(), []byte(`"msg"`)) {
+		t.Errorf("JSON handler did not produce JSON output: %q", buf.String())
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("json-sentinel")) {
+		t.Errorf("message missing from JSON output: %q", buf.String())
+	}
+}
+
+func TestBuildLogger_VerboseAndJSONLogs(t *testing.T) {
+	var buf bytes.Buffer
+	lg := buildLogger(true, true, &buf)
+
+	lg.Debug("verbose-json-sentinel")
+	if !bytes.Contains(buf.Bytes(), []byte("verbose-json-sentinel")) {
+		t.Errorf("debug message missing from JSON+verbose output: %q", buf.String())
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(`"msg"`)) {
+		t.Errorf("JSON handler did not produce JSON output in verbose mode: %q", buf.String())
 	}
 }
 
@@ -708,5 +856,58 @@ func TestRunWithDeps_DryRun_VerifyFailureAbortsWithSameExitCode(t *testing.T) {
 	}
 	if code := exitCodeFor(err); code != 3 {
 		t.Errorf("exitCodeFor(ErrSelfVerifyFailed) = %d, want 3", code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestNoSlogImportInSigningPackages — AC #3
+// Asserts that internal/ssz, internal/bls, and internal/deposit do not
+// import log/slog. These packages are in the signing path and must remain
+// free of logging to prevent accidental secret exposure.
+// ---------------------------------------------------------------------------
+
+func TestNoSlogImportInSigningPackages(t *testing.T) {
+	signingPkgDirs := []string{
+		"../../internal/ssz",
+		"../../internal/bls",
+		"../../internal/deposit",
+	}
+
+	for _, dir := range signingPkgDirs {
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			t.Fatalf("filepath.Abs(%q): %v", dir, err)
+		}
+
+		entries, err := os.ReadDir(absDir)
+		if err != nil {
+			t.Fatalf("os.ReadDir(%q): %v", absDir, err)
+		}
+
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
+				continue
+			}
+			path := filepath.Join(absDir, e.Name())
+			f, err := os.Open(path)
+			if err != nil {
+				t.Fatalf("open %q: %v", path, err)
+			}
+
+			sc := bufio.NewScanner(f)
+			lineNum := 0
+			for sc.Scan() {
+				lineNum++
+				line := sc.Text()
+				if strings.Contains(line, `"log/slog"`) {
+					t.Errorf("signing package %q imports log/slog at line %d: %s",
+						path, lineNum, line)
+				}
+			}
+			f.Close() //nolint:errcheck
+			if err := sc.Err(); err != nil {
+				t.Fatalf("scan %q: %v", path, err)
+			}
+		}
 	}
 }

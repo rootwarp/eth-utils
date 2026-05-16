@@ -49,6 +49,12 @@ type Config struct {
 	// stdout instead of creating a file on disk. The output-dir is validated but
 	// nothing is written there. The summary line and sha256 still print to stderr.
 	DryRun bool
+
+	// Verbose enables debug-level log output when true. Default is false (Info level).
+	Verbose bool
+
+	// JSONLogs selects the JSON log handler when true. Default is false (text handler).
+	JSONLogs bool
 }
 
 // NewApp constructs and returns a configured *cli.App. The run callback receives
@@ -128,6 +134,14 @@ OPTIONS:
 			Name:  "dry-run",
 			Usage: "Print the deposit JSON to stdout instead of writing a file to --output-dir; no file is created. The sha256 on stderr matches the bytes written to stdout.",
 		},
+		&ucli.BoolFlag{
+			Name:  "verbose",
+			Usage: "Enable debug-level structured logging to stderr",
+		},
+		&ucli.BoolFlag{
+			Name:  "json-logs",
+			Usage: "Emit logs as JSON objects instead of human-readable text",
+		},
 	}
 
 	app.Action = func(c *ucli.Context) error {
@@ -173,6 +187,8 @@ OPTIONS:
 			PassphraseEnv: c.String("passphrase-env"),
 			MainnetAck:    mainnetAck,
 			DryRun:        c.Bool("dry-run"),
+			Verbose:       c.Bool("verbose"),
+			JSONLogs:      c.Bool("json-logs"),
 		}
 
 		// 5. Print confirmation banner to stderr before invoking run.
