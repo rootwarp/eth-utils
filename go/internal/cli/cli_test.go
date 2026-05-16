@@ -1005,6 +1005,99 @@ func TestParallelFlag(t *testing.T) {
 	})
 }
 
+// false and is propagated correctly in Config.
+func TestVerifyWithDepositCLIFlag(t *testing.T) {
+	dir := t.TempDir()
+	ksDir := t.TempDir()
+
+	t.Run("defaults_to_false", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if cfg.VerifyWithDepositCLI {
+			t.Error("VerifyWithDepositCLI = true, want false by default")
+		}
+	})
+
+	t.Run("set_to_true", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+			"--verify-with-deposit-cli",
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if !cfg.VerifyWithDepositCLI {
+			t.Error("VerifyWithDepositCLI = false, want true when --verify-with-deposit-cli is passed")
+		}
+	})
+}
+
+// TestDepositCLIPathFlag verifies that --deposit-cli-path defaults to "deposit" and is
+// propagated correctly in Config.
+func TestDepositCLIPathFlag(t *testing.T) {
+	dir := t.TempDir()
+	ksDir := t.TempDir()
+
+	t.Run("defaults_to_deposit", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if cfg.DepositCLIPath != "deposit" {
+			t.Errorf("DepositCLIPath = %q, want %q", cfg.DepositCLIPath, "deposit")
+		}
+	})
+
+	t.Run("custom_path", func(t *testing.T) {
+		args := []string{
+			"--keystore-dir", ksDir,
+			"--pubkeys", "0x" + validPubkey,
+			"--network", "hoodi",
+			"--output-dir", dir,
+			"--deposit-cli-path", "/usr/local/bin/deposit",
+		}
+		cfg, _, called, err := runApp(t, args)
+		if err != nil {
+			t.Fatalf("runApp: %v", err)
+		}
+		if !called {
+			t.Fatal("run callback was not called")
+		}
+		if cfg.DepositCLIPath != "/usr/local/bin/deposit" {
+			t.Errorf("DepositCLIPath = %q, want %q", cfg.DepositCLIPath, "/usr/local/bin/deposit")
+		}
+	})
+}
+
+// TestKeystoreDirValidation verifies that --keystore-dir must point to an existing,
+// readable directory, matching AC3 of Issue #25.
 // TestKeystoreDirValidation verifies that --keystore-dir must point to an existing,
 // readable directory, matching AC3 of Issue #25.
 func TestKeystoreDirValidation(t *testing.T) {
