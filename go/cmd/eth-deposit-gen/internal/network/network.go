@@ -49,7 +49,7 @@ func Lookup(n Network) (Params, error) {
 	case Mainnet:
 		return Params{}, ErrMainnetNotEnabled
 	default:
-		return Params{}, fmt.Errorf("unknown network %q: only %q and %q are supported", n, Hoodi, Mainnet)
+		return Params{}, fmt.Errorf("unknown network %q: only %q is currently supported (mainnet planned for Phase 2)", n, Hoodi)
 	}
 }
 
