@@ -41,6 +41,11 @@ type Params struct {
 	// network. Empty string means no default ships with this tool (callers must
 	// supply --rpc-url explicitly).
 	DefaultRPCURL string
+
+	// ExplorerURL is the base URL of the block explorer for this network
+	// (e.g. "https://etherscan.io"). Used to format tx hash links.
+	// Source: etherscan.io per-network subdomains.
+	ExplorerURL string
 }
 
 // DepositContractAddressHex returns the deposit contract address as a
@@ -79,6 +84,7 @@ func Lookup(n Network) (Params, error) {
 			ChainID:                1,
 			DepositContractAddress: mustParseAddr("00000000219ab540356cBB839Cbe05303d7705Fa"),
 			DefaultRPCURL:          "",
+			ExplorerURL:            "https://etherscan.io",
 		}, nil
 	case Hoodi:
 		return Params{
@@ -87,6 +93,7 @@ func Lookup(n Network) (Params, error) {
 			ChainID:                560048,
 			DepositContractAddress: mustParseAddr("00000000219ab540356cBB839Cbe05303d7705Fa"),
 			DefaultRPCURL:          "",
+			ExplorerURL:            "https://hoodi.etherscan.io",
 		}, nil
 	case Sepolia:
 		return Params{
@@ -95,6 +102,7 @@ func Lookup(n Network) (Params, error) {
 			ChainID:                11155111,
 			DepositContractAddress: mustParseAddr("7f02C3E3c98b133055B8B348B2Ac625669Ed295D"),
 			DefaultRPCURL:          "",
+			ExplorerURL:            "https://sepolia.etherscan.io",
 		}, nil
 	case Holesky:
 		return Params{
@@ -103,11 +111,27 @@ func Lookup(n Network) (Params, error) {
 			ChainID:                17000,
 			DepositContractAddress: mustParseAddr("4242424242424242424242424242424242424242"),
 			DefaultRPCURL:          "",
+			ExplorerURL:            "https://holesky.etherscan.io",
 		}, nil
 	default:
 		return Params{}, fmt.Errorf("unknown network %q: must be one of %q, %q, %q, %q",
 			n, Mainnet, Hoodi, Sepolia, Holesky)
 	}
+}
+
+// LookupByChainID returns the Params for the network with the given chain ID.
+// Returns an error if no supported network matches.
+func LookupByChainID(chainID uint64) (Params, error) {
+	for _, n := range []Network{Mainnet, Hoodi, Sepolia, Holesky} {
+		p, err := Lookup(n)
+		if err != nil {
+			continue
+		}
+		if p.ChainID == chainID {
+			return p, nil
+		}
+	}
+	return Params{}, fmt.Errorf("unknown chain ID %d: not a supported network", chainID)
 }
 
 // ParseFlag parses a network flag string and returns the corresponding Network.
