@@ -40,6 +40,11 @@ func TestExitCodeFor(t *testing.T) {
 		// User rejection → exit 4.
 		{"ErrUserRejected direct", signer.ErrUserRejected, 4},
 		{"ErrUserRejected wrapped", fmt.Errorf("ledger: %w", signer.ErrUserRejected), 4},
+		// Broadcast / RPC sentinel errors → exit 5.
+		{"ErrRPCDial direct", internaltx.ErrRPCDial, 5},
+		{"ErrBroadcastFailed direct", internaltx.ErrBroadcastFailed, 5},
+		{"ErrBroadcastChainIDMismatch direct", internaltx.ErrBroadcastChainIDMismatch, 5},
+		{"ErrBroadcastFailed wrapped", fmt.Errorf("rpc: %w", internaltx.ErrBroadcastFailed), 5},
 	}
 
 	for _, tc := range cases {

@@ -157,6 +157,66 @@ func TestParseFlag(t *testing.T) {
 	}
 }
 
+// TestLookupByChainID verifies reverse lookup by chain ID for all 4 networks
+// and an error case for an unknown chain ID.
+func TestLookupByChainID(t *testing.T) {
+	cases := []struct {
+		chainID     uint64
+		wantNetwork network.Network
+		wantURL     string
+	}{
+		{1, network.Mainnet, "https://etherscan.io"},
+		{560048, network.Hoodi, "https://hoodi.etherscan.io"},
+		{11155111, network.Sepolia, "https://sepolia.etherscan.io"},
+		{17000, network.Holesky, "https://holesky.etherscan.io"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(string(tc.wantNetwork), func(t *testing.T) {
+			p, err := network.LookupByChainID(tc.chainID)
+			if err != nil {
+				t.Fatalf("LookupByChainID(%d) error = %v, want nil", tc.chainID, err)
+			}
+			if p.Name != tc.wantNetwork {
+				t.Errorf("Name = %q, want %q", p.Name, tc.wantNetwork)
+			}
+			if p.ChainID != tc.chainID {
+				t.Errorf("ChainID = %d, want %d", p.ChainID, tc.chainID)
+			}
+			if p.ExplorerURL != tc.wantURL {
+				t.Errorf("ExplorerURL = %q, want %q", p.ExplorerURL, tc.wantURL)
+			}
+		})
+	}
+
+	t.Run("unknown_chain_ID", func(t *testing.T) {
+		_, err := network.LookupByChainID(99999)
+		if err == nil {
+			t.Error("LookupByChainID(99999) error = nil, want error")
+		}
+	})
+}
+
+// TestLookupExplorerURL verifies ExplorerURL is set for all known networks.
+func TestLookupExplorerURL(t *testing.T) {
+	for _, n := range []network.Network{network.Mainnet, network.Hoodi, network.Sepolia, network.Holesky} {
+		n := n
+		t.Run(string(n), func(t *testing.T) {
+			p, err := network.Lookup(n)
+			if err != nil {
+				t.Fatalf("Lookup(%q) error = %v", n, err)
+			}
+			if p.ExplorerURL == "" {
+				t.Errorf("ExplorerURL is empty for network %q", n)
+			}
+			if !strings.HasPrefix(p.ExplorerURL, "https://") {
+				t.Errorf("ExplorerURL = %q: expected https:// prefix", p.ExplorerURL)
+			}
+		})
+	}
+}
+
 // TestDepositContractAddressHex verifies the hex formatting helper.
 func TestDepositContractAddressHex(t *testing.T) {
 	params, err := network.Lookup(network.Holesky)

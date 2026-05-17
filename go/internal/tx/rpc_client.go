@@ -11,7 +11,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/rlp"
 )
 
 // EthBroadcaster broadcasts a signed transaction via JSON-RPC.
@@ -62,9 +61,12 @@ func (c *ethClient) SendRawTransaction(ctx context.Context, rawRLP string) (stri
 		return "", fmt.Errorf("%w: decode rawRLP: %v", ErrBroadcastFailed, err)
 	}
 
+	// UnmarshalBinary handles the EIP-2718 typed envelope (0x02 || rlp(...))
+	// produced by types.Transaction.MarshalBinary. rlp.DecodeBytes cannot be
+	// used here — it would reject the leading type byte.
 	var tx types.Transaction
-	if err := rlp.DecodeBytes(rawBytes, &tx); err != nil {
-		return "", fmt.Errorf("%w: decode RLP: %v", ErrBroadcastFailed, err)
+	if err := tx.UnmarshalBinary(rawBytes); err != nil {
+		return "", fmt.Errorf("%w: decode EIP-2718: %v", ErrBroadcastFailed, err)
 	}
 
 	if err := c.client.SendTransaction(ctx, &tx); err != nil {
