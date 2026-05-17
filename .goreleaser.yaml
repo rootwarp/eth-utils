@@ -1,13 +1,17 @@
-# .goreleaser.yaml — Release configuration for eth-deposit-gen
+# .goreleaser.yaml — Release configuration for eth-deposit-gen and eth-deposit-tx
+#
+# This file builds TWO binaries per release:
+#   eth-deposit-gen  — BLS deposit data generator
+#   eth-deposit-tx   — Deposit transaction builder, signer, and broadcaster
 #
 # CGO strategy: native-runner matrix (CI), zig cc cross-compilation (local)
 # --------------------------------------------------------------------------
-# eth-deposit-gen depends on github.com/herumi/bls-eth-go-binary, which ships
-# prebuilt static archives (.a) for each target OS/arch inside the Go module
-# (bls/lib/{darwin,linux}/{amd64,arm64}/libbls384_256.a). CGO_ENABLED=1 is
-# therefore required; the binary cannot be built with pure Go.
+# Both binaries depend on CGO:
+#   eth-deposit-gen: github.com/herumi/bls-eth-go-binary (prebuilt .a per target)
+#   eth-deposit-tx:  go-ethereum usbwallet/HID for Ledger support
+# CGO_ENABLED=1 is required; pure-Go builds are not supported.
 #
-# CI release builds (#21): test jobs run natively per OS/arch (ubuntu-latest,
+# CI release builds: test jobs run natively per OS/arch (ubuntu-latest,
 # ubuntu-24.04-arm, macos-14); the release build runs in a single
 # ghcr.io/goreleaser/goreleaser-cross:v1.25.9 container on ubuntu-latest,
 # which bundles osxcross and GNU cross-compilers for all 4 targets.
@@ -25,13 +29,14 @@
 
 version: 2
 
-project_name: eth-deposit-gen
+project_name: eth-utils
 
 before:
   hooks:
     - go -C go mod verify
 
 builds:
+  # ── eth-deposit-gen ──────────────────────────────────────────────────────
   # darwin builds — natively on macOS runners in local snapshot;
   # cross-compiled via osxcross in CI (goreleaser-cross container).
   # CC_FOR_DARWIN_AMD64 / CC_FOR_DARWIN_ARM64 are set in CI to the osxcross
@@ -115,14 +120,106 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
 
+  # ── eth-deposit-tx ───────────────────────────────────────────────────────
+  # Same CGO / CC strategy as eth-deposit-gen. Build IDs are prefixed with
+  # "tx-" to avoid conflicts with the eth-deposit-gen build IDs.
+  - id: tx-darwin-amd64
+    main: ./cmd/eth-deposit-tx
+    dir: go
+    binary: eth-deposit-tx
+    goos:
+      - darwin
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+      - 'CC={{ if index .Env "CC_FOR_DARWIN_AMD64" }}{{ .Env.CC_FOR_DARWIN_AMD64 }}{{ else }}cc{{ end }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: tx-darwin-arm64
+    main: ./cmd/eth-deposit-tx
+    dir: go
+    binary: eth-deposit-tx
+    goos:
+      - darwin
+    goarch:
+      - arm64
+    env:
+      - CGO_ENABLED=1
+      - 'CC={{ if index .Env "CC_FOR_DARWIN_ARM64" }}{{ .Env.CC_FOR_DARWIN_ARM64 }}{{ else }}cc{{ end }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: tx-linux-amd64
+    main: ./cmd/eth-deposit-tx
+    dir: go
+    binary: eth-deposit-tx
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+      - 'CC={{ if index .Env "CC_FOR_LINUX_AMD64" }}{{ .Env.CC_FOR_LINUX_AMD64 }}{{ else }}cc{{ end }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: tx-linux-arm64
+    main: ./cmd/eth-deposit-tx
+    dir: go
+    binary: eth-deposit-tx
+    goos:
+      - linux
+    goarch:
+      - arm64
+    env:
+      - CGO_ENABLED=1
+      - 'CC={{ if index .Env "CC_FOR_LINUX_ARM64" }}{{ .Env.CC_FOR_LINUX_ARM64 }}{{ else }}cc{{ end }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
 archives:
-  - id: default
+  - id: eth-deposit-gen
     ids:
       - darwin-amd64
       - darwin-arm64
       - linux-amd64
       - linux-arm64
-    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "eth-deposit-gen_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    files:
+      - README.md
+      - LICENSE
+
+  - id: eth-deposit-tx
+    ids:
+      - tx-darwin-amd64
+      - tx-darwin-arm64
+      - tx-linux-amd64
+      - tx-linux-arm64
+    name_template: "eth-deposit-tx_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
     files:
