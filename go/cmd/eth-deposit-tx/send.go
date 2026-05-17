@@ -82,6 +82,25 @@ WARNING: This command broadcasts to the live network and SPENDS REAL ETH.
 You will be prompted to type the network name before anything is sent.
 Use --yes to bypass the confirmation prompt (for automation only).
 
+Examples:
+
+  # Broadcast with interactive confirmation (type "holesky" when prompted):
+  eth-deposit-tx send \
+    --input signed.json \
+    --rpc-url https://holesky.infura.io/v3/<your-key>
+
+  # Broadcast non-interactively and wait for receipt (CI / automation):
+  eth-deposit-tx send \
+    --input signed.json \
+    --rpc-url https://holesky.infura.io/v3/<your-key> \
+    --yes \
+    --wait-for-receipt \
+    --receipt-output receipt.json
+
+  # Read signed tx from stdin (e.g. piped from run --output -):
+  eth-deposit-tx run --signer local ... --output - | \
+    eth-deposit-tx send --input - --rpc-url https://... --yes
+
 Exit codes:
   0  Success
   2  User / configuration error (missing flags, invalid JSON)
@@ -149,7 +168,7 @@ func sendAction(c *ucli.Context, cfg *SendConfig) error {
 	// 2. Dial RPC.
 	broadcaster, err := newBroadcaster(c.Context, cfg.RPCURL)
 	if err != nil {
-		return fmt.Errorf("%w", err)
+		return err
 	}
 	defer broadcaster.Close()
 
@@ -209,7 +228,7 @@ func sendAction(c *ucli.Context, cfg *SendConfig) error {
 	fmt.Fprintf(c.App.ErrWriter, "> Broadcasting...\n")
 	txHash, err := broadcaster.SendRawTransaction(c.Context, signed.RawRLP)
 	if err != nil {
-		return fmt.Errorf("%w", err)
+		return err
 	}
 
 	// 8. Print result.

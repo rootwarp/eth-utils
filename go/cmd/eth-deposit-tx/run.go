@@ -103,20 +103,35 @@ Partial-failure behavior:
   Signed output files use atomic rename (temp file in same directory) so a partial
   write never leaves a corrupt signed.json or signed.raw.
 
-Example (local signer, Holesky):
-  ETH_DEPOSIT_TX_PRIVATE_KEY=0x<dev-key> eth-deposit-tx run \
+Examples:
+
+  # Local signer — output to stdout (pipe into send):
+  ETH_DEPOSIT_TX_PRIVATE_KEY=0x<your-dev-key> eth-deposit-tx run \
+    --network holesky \
+    --input-file deposit_data.json \
+    --signer local
+
+  # Local signer — save to file, then broadcast separately:
+  ETH_DEPOSIT_TX_PRIVATE_KEY=0x<your-dev-key> eth-deposit-tx run \
     --network holesky \
     --input-file deposit_data.json \
     --signer local \
     --output signed.json
 
-Example (Ledger, keep unsigned for audit):
+  # Ledger hardware wallet — keep unsigned tx for audit trail:
   eth-deposit-tx run \
     --network holesky \
     --input-file deposit_data.json \
     --signer ledger \
     --output signed.json \
-    --keep-unsigned`,
+    --keep-unsigned
+
+Exit codes:
+  0  Success
+  2  User / configuration error (missing file, bad --network, missing --signer)
+  3  Signer / crypto error (bad key, no Ledger device, Ethereum app not open)
+  4  User abort (Ctrl-C or rejection on Ledger device)
+  1  Unexpected internal error`,
 		UsageText: `eth-deposit-tx run --input-file FILE --network NET --signer local|ledger [options]`,
 		Flags: append(
 			buildFlags(),

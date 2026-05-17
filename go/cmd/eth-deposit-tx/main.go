@@ -1,13 +1,14 @@
 // Package main is the entry point for eth-deposit-tx.
-// It sets up the urfave/cli/v2 application and wires the build, sign, and run subcommands.
+// It sets up the urfave/cli/v2 application and wires the build, sign, run, and send subcommands.
 //
 // Exit codes:
 //
 //	0 — success
+//	1 — unexpected / internal error
 //	2 — user / configuration error (bad input, unknown network, missing file, etc.)
 //	3 — signer / crypto error (bad key, no device, app not open, chain ID mismatch)
 //	4 — user abort (SIGINT or Ledger rejection)
-//	1 — unexpected / internal error
+//	5 — broadcast / RPC error (dial failure, eth_sendRawTransaction error)
 package main
 
 import (
@@ -85,15 +86,29 @@ and produces an unsigned EIP-1559 transaction for the Beacon Chain deposit contr
 
 Supports offline/air-gapped mode (no --rpc-url required) when all gas and nonce
 flags are supplied explicitly, and hybrid mode when --rpc-url is provided.
+Output is written to stdout by default; use --output FILE or --output - for explicit stdout.
 
-Example (Holesky testnet, default gas params, output to stdout):
-   eth-deposit-tx build --network holesky --input-file deposit_data.json
+Examples:
 
-Example (write unsigned tx to a file):
-   eth-deposit-tx build --network holesky --input-file deposit_data.json --output unsigned.json
+  # Output unsigned tx to stdout (pipe-friendly):
+  eth-deposit-tx build --network holesky --input-file deposit_data.json
 
-Example (read deposit data from stdin):
-   cat deposit_data.json | eth-deposit-tx build --network holesky --input-file -`,
+  # Save unsigned tx to a file for the air-gapped sign step:
+  eth-deposit-tx build --network holesky --input-file deposit_data.json --output unsigned.json
+
+  # Read deposit data from stdin (e.g. from a hardware-encrypted volume):
+  cat deposit_data.json | eth-deposit-tx build --network holesky --input-file -
+
+  # Offline / air-gapped: supply all gas and nonce explicitly (no RPC needed):
+  eth-deposit-tx build --network holesky --input-file deposit_data.json \
+    --nonce 7 --gas-limit 250000 \
+    --max-fee-per-gas 20000000000 --max-priority-fee-per-gas 1000000000 \
+    --output unsigned.json
+
+Exit codes:
+  0  Success
+  2  User / configuration error (missing file, invalid JSON, bad --network, out-of-range --index)
+  1  Unexpected internal error`,
 		UsageText: `eth-deposit-tx build --input-file FILE --network NET [options]`,
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{
