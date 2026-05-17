@@ -253,10 +253,10 @@ chmod u+w ./out
 
 ## For contributors
 
-- [Architecture overview](../../../../docs/architecture.md)
-- [Product requirements](../../../../docs/prd.md)
-- [Project plan](../../../../docs/project-plan.md)
+- [Architecture overview](../../../docs/architecture.md)
+- [Product requirements](../../../docs/prd.md)
+- [Project plan](../../../docs/project-plan.md)
 - Research notes:
-  - [BLS and SSZ libraries](../../../../docs/research/bls-ssz-libraries.md)
-  - [Deposit spec](../../../../docs/research/deposit-spec.md)
-  - [Keystore decoding](../../../../docs/research/keystore-decoding.md)
+  - [BLS and SSZ libraries](../../../docs/research/bls-ssz-libraries.md)
+  - [Deposit spec](../../../docs/research/deposit-spec.md)
+  - [Keystore decoding](../../../docs/research/keystore-decoding.md)
