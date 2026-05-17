@@ -45,7 +45,8 @@ func main() {
 		Usage: "Create and sign Ethereum deposit transactions from deposit data JSON",
 		UsageText: `eth-deposit-tx build [options]
    eth-deposit-tx sign [options]
-   eth-deposit-tx run [options]`,
+   eth-deposit-tx run [options]
+   eth-deposit-tx send [options]`,
 		Version: fmt.Sprintf("%s (commit=%s, built=%s)", version, commit, date),
 		Description: `eth-deposit-tx converts Launchpad-compatible deposit_data JSON into raw Ethereum transactions
 for the Beacon Chain deposit contract.
@@ -54,14 +55,16 @@ It supports a secure two-phase workflow:
   build  - Construct an unsigned transaction (supports offline/air-gapped mode)
   sign   - Sign the transaction, with Ledger hardware as the primary method
   run    - Convenience: build + sign in one step (same machine, no serialization to disk)
+  send   - Broadcast a signed tx via JSON-RPC (requires explicit network-name confirmation)
 
 The tool produces standard hex-encoded RLP output ready for eth_sendRawTransaction.
 
-Exit codes: 0=success, 1=internal error, 2=bad input, 3=signer/crypto error, 4=user abort.`,
+Exit codes: 0=success, 1=internal error, 2=bad input, 3=signer/crypto error, 4=user abort, 5=broadcast/RPC error.`,
 		Commands: []*ucli.Command{
 			buildCommand(),
 			signCommand(),
 			runCommand(),
+			sendCommand(),
 		},
 		// Suppress urfave's default ExitCoder printer; we log via slog below.
 		ExitErrHandler: func(_ *ucli.Context, _ error) {},

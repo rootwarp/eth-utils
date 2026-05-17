@@ -6,6 +6,8 @@
 //	3 — signer / crypto errors (bad key, no Ledger device, Ethereum app not open,
 //	    chain ID mismatch, signer closed)
 //	4 — user abort (SIGINT / context.Canceled / Ledger device rejection)
+//	5 — broadcast / RPC errors (dial failure, eth_sendRawTransaction error,
+//	    chain ID mismatch between signed tx and RPC node)
 //	1 — fallback for any other error
 package main
 
@@ -17,6 +19,7 @@ import (
 	ucli "github.com/urfave/cli/v2"
 
 	"github.com/rootwarp/eth-utils/go/internal/signer"
+	internaltx "github.com/rootwarp/eth-utils/go/internal/tx"
 )
 
 // ErrInvalidInput is the sentinel for user / configuration errors (exit code 2).
@@ -57,6 +60,12 @@ func ExitCodeFor(err error) int {
 		errors.Is(err, signer.ErrChainIDMismatch) ||
 		errors.Is(err, signer.ErrLedgerNotSupported) {
 		return 3
+	}
+	// Exit code 5: broadcast / RPC errors.
+	if errors.Is(err, internaltx.ErrRPCDial) ||
+		errors.Is(err, internaltx.ErrBroadcastFailed) ||
+		errors.Is(err, internaltx.ErrBroadcastChainIDMismatch) {
+		return 5
 	}
 	// Fallback.
 	return 1
