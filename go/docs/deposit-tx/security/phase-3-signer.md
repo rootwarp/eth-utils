@@ -120,8 +120,8 @@ The repo transitively requires CGO via `herumi/bls-eth-go-binary`. `ledger_nocgo
 Run these from the repo root to re-verify key security properties:
 
 ```sh
-# 1. No raw key values in error paths
-grep -rn 'hexKey\|rawKey\|keyBytes\|privateKey' go/internal/signer/
+# 1. No raw key values in Errorf/fmt.Sprintf calls (function param names are OK)
+grep -rn 'Errorf.*hexKey\|Errorf.*rawKey\|Sprintf.*hexKey\|Sprintf.*rawKey' go/internal/signer/
 
 # 2. Only env var name (not value) appears in CLI layer
 grep -n 'private.key' go/cmd/eth-deposit-tx/sign.go

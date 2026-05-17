@@ -408,6 +408,47 @@ func TestSignCommand_InvalidEnvVarName_KeyPassedDirectly(t *testing.T) {
 	}
 }
 
+func TestSignCommand_OutputWriteError_Exit2(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	envVar := "TEST_SIGN_KEY_WRITEERR_" + randomSuffix(t)
+	t.Setenv(envVar, "0x"+generateTestPrivKey(t))
+
+	inFile := filepath.Join(t.TempDir(), "unsigned.json")
+	if err := os.WriteFile(inFile, unsignedTxJSON(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a read-only directory; writing a file inside it should fail.
+	roDir := filepath.Join(t.TempDir(), "readonly")
+	if err := os.MkdirAll(roDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0o700) }) // restore for cleanup
+	outFile := filepath.Join(roDir, "signed.json")
+
+	app := newTestApp()
+	var buf bytes.Buffer
+	app.Writer = &buf
+	app.ErrWriter = &buf
+
+	err := app.Run([]string{
+		"eth-deposit-tx", "sign",
+		"--signer", "local",
+		"--input", inFile,
+		"--output", outFile,
+		"--private-key-env", envVar,
+	})
+	if err == nil {
+		t.Fatal("expected error for unwritable output file, got nil")
+	}
+	if got := ExitCodeFor(err); got != 2 {
+		t.Errorf("exit code = %d, want 2; err = %v", got, err)
+	}
+}
+
 func TestSignCommand_OutputFilePermissions(t *testing.T) {
 	orig := ucli.OsExiter
 	ucli.OsExiter = func(int) {}

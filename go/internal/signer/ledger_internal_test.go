@@ -515,12 +515,15 @@ func TestLedgerSigner_Sign_PreCancelledContext(t *testing.T) {
 }
 
 func TestLedgerSigner_Sign_ContextCancelledMidSign(t *testing.T) {
-	// blockCh blocks the SignTxFn goroutine until we release it via t.Cleanup.
+	// readyCh signals that SignTxFn has started (goroutine is blocked).
+	// blockCh blocks SignTxFn until test cleanup.
+	readyCh := make(chan struct{})
 	blockCh := make(chan struct{})
 	t.Cleanup(func() { close(blockCh) })
 
 	w := &mockWallet{
 		SignTxFn: func(_ accounts.Account, _ *types.Transaction, _ *big.Int) (*types.Transaction, error) {
+			close(readyCh) // signal: goroutine is now blocked
 			<-blockCh
 			return nil, errors.New("cancelled by test cleanup")
 		},
@@ -535,6 +538,7 @@ func TestLedgerSigner_Sign_ContextCancelledMidSign(t *testing.T) {
 	s.setConfirmationPrompt(&bytes.Buffer{})
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -542,6 +546,8 @@ func TestLedgerSigner_Sign_ContextCancelledMidSign(t *testing.T) {
 		errCh <- err
 	}()
 
+	// Wait for SignTxFn to be executing (goroutine is blocked on blockCh).
+	<-readyCh
 	cancel()
 
 	signErr := <-errCh
