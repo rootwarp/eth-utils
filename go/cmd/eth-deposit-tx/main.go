@@ -6,10 +6,15 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	ucli "github.com/urfave/cli/v2"
+
+	"github.com/rootwarp/eth-utils/go/internal/deposit"
+	internaltx "github.com/rootwarp/eth-utils/go/internal/tx"
 )
 
 // version, commit, and date are set at build time via -ldflags.
@@ -113,13 +118,67 @@ Supports both hybrid mode (with optional --rpc-url) and fully offline/air-gapped
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(c.App.Writer,
-				"build: would build for network=%s chain_id=%d contract=%s (Phase 2 will perform real ABI encoding)\n",
-				cfg.Network,
-				cfg.NetworkParams.ChainID,
-				cfg.NetworkParams.DepositContractAddressHex(),
-			)
-			return nil
+
+			// Read deposit data from file or stdin.
+			var rawData []byte
+			if cfg.InputFile == "-" {
+				rawData, err = io.ReadAll(c.App.Reader)
+			} else {
+				rawData, err = os.ReadFile(cfg.InputFile)
+			}
+			if err != nil {
+				return ucli.Exit(fmt.Sprintf("--input-file: %v", err), 2)
+			}
+
+			entries, err := deposit.EntriesFromJSON(rawData)
+			if err != nil {
+				return ucli.Exit(fmt.Sprintf("--input-file: invalid JSON: %v", err), 2)
+			}
+			if len(entries) == 0 {
+				return ucli.Exit("--input-file: file contains no deposit entries", 2)
+			}
+			if cfg.Index < 0 || cfg.Index >= len(entries) {
+				return ucli.Exit(fmt.Sprintf("--index %d: out of bounds (file has %d entries)", cfg.Index, len(entries)), 2)
+			}
+			entry := entries[cfg.Index]
+
+			if err := entry.Validate(); err != nil {
+				return ucli.Exit(fmt.Sprintf("deposit entry validation: %v", err), 2)
+			}
+
+			stubCfg := internaltx.StubConfig{
+				NetworkParams:        cfg.NetworkParams,
+				RPCURL:               cfg.RPCURL,
+				GasLimit:             cfg.GasLimit,
+				MaxFeePerGas:         cfg.MaxFeePerGas,
+				MaxPriorityFeePerGas: cfg.MaxPriorityFeePerGas,
+			}
+			if cfg.Nonce != nil {
+				stubCfg.Nonce = *cfg.Nonce
+			}
+			if stubCfg.MaxFeePerGas == nil {
+				stubCfg.MaxFeePerGas = defaultMaxFeePerGas()
+			}
+			if stubCfg.MaxPriorityFeePerGas == nil {
+				stubCfg.MaxPriorityFeePerGas = defaultMaxPriorityFeePerGas()
+			}
+
+			unsignedTx, err := internaltx.BuildUnsigned(entry, stubCfg)
+			if err != nil {
+				return ucli.Exit(fmt.Sprintf("build: %v", err), 2)
+			}
+
+			out, err := json.MarshalIndent(unsignedTx, "", "  ")
+			if err != nil {
+				return ucli.Exit(fmt.Sprintf("build: marshal: %v", err), 2)
+			}
+			out = append(out, '\n')
+
+			if cfg.OutputFile == "" {
+				_, err = c.App.Writer.Write(out)
+				return err
+			}
+			return os.WriteFile(cfg.OutputFile, out, 0o644)
 		},
 	}
 }

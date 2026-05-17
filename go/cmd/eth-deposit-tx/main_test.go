@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -81,24 +84,165 @@ func TestBuildSubcommand_Action_Success(t *testing.T) {
 	ucli.OsExiter = func(code int) {}
 	t.Cleanup(func() { ucli.OsExiter = orig })
 
+	fixture := fixtureAbsPath(t)
+
 	app := newTestApp()
 	var out bytes.Buffer
 	app.Writer = &out
 	app.ErrWriter = &out
 
-	err := app.Run([]string{"eth-deposit-tx", "build", "--network", "holesky", "--input-file", "deposit.json"})
+	err := app.Run([]string{"eth-deposit-tx", "build", "--network", "holesky", "--input-file", fixture})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	s := out.String()
-	if !strings.Contains(s, "network=holesky") {
-		t.Errorf("action output missing network, got: %s", s)
+
+	var tx map[string]interface{}
+	if err := json.Unmarshal(out.Bytes(), &tx); err != nil {
+		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, out.String())
 	}
-	if !strings.Contains(s, "chain_id=17000") {
-		t.Errorf("action output missing chain_id, got: %s", s)
+	for _, field := range []string{"chainId", "to", "value", "data", "gas", "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "type"} {
+		if _, ok := tx[field]; !ok {
+			t.Errorf("output JSON missing field %q", field)
+		}
 	}
-	if !strings.Contains(s, "contract=0x") {
-		t.Errorf("action output missing contract address, got: %s", s)
+	if tx["type"] != "0x2" {
+		t.Errorf("type: got %v, want 0x2", tx["type"])
+	}
+	if data, _ := tx["data"].(string); !strings.HasPrefix(data, "0x22895118") {
+		t.Errorf("data must start with deposit() selector, got: %s", data)
+	}
+}
+
+func TestBuildSubcommand_Action_StdinInput(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	fixture := fixtureAbsPath(t)
+	rawData, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app := newTestApp()
+	var out bytes.Buffer
+	app.Writer = &out
+	app.ErrWriter = &out
+	app.Reader = bytes.NewReader(rawData)
+
+	err = app.Run([]string{"eth-deposit-tx", "build", "--network", "holesky", "--input-file", "-"})
+	if err != nil {
+		t.Fatalf("stdin input: unexpected error: %v", err)
+	}
+	if !json.Valid(out.Bytes()) {
+		t.Errorf("stdin input: output is not valid JSON: %s", out.String())
+	}
+}
+
+func TestBuildSubcommand_Action_StdoutDefault(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	fixture := fixtureAbsPath(t)
+
+	app := newTestApp()
+	var out bytes.Buffer
+	app.Writer = &out
+	app.ErrWriter = &out
+
+	// No --output flag: output goes to stdout (app.Writer)
+	err := app.Run([]string{"eth-deposit-tx", "build", "--network", "holesky", "--input-file", fixture})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(out.Bytes()) {
+		t.Errorf("stdout default: output is not valid JSON: %s", out.String())
+	}
+}
+
+func TestBuildSubcommand_Action_OutputToFile(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	fixture := fixtureAbsPath(t)
+	outFile := filepath.Join(t.TempDir(), "unsigned.json")
+
+	app := newTestApp()
+	var buf bytes.Buffer
+	app.Writer = &buf
+	app.ErrWriter = &buf
+
+	err := app.Run([]string{"eth-deposit-tx", "build", "--network", "holesky",
+		"--input-file", fixture, "--output", outFile})
+	if err != nil {
+		t.Fatalf("output to file: unexpected error: %v", err)
+	}
+	written, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("could not read output file: %v", err)
+	}
+	if !json.Valid(written) {
+		t.Errorf("output file: not valid JSON: %s", string(written))
+	}
+}
+
+func TestBuildSubcommand_Action_MissingInputFile(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	app := newTestApp()
+	var buf bytes.Buffer
+	app.Writer = &buf
+	app.ErrWriter = &buf
+
+	err := app.Run([]string{"eth-deposit-tx", "build", "--network", "holesky",
+		"--input-file", "/nonexistent/path/deposit.json"})
+	if err == nil {
+		t.Fatal("expected error for missing input file, got nil")
+	}
+}
+
+func TestBuildSubcommand_Action_InvalidJSON(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	badFile := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(badFile, []byte("not json at all"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := newTestApp()
+	var buf bytes.Buffer
+	app.Writer = &buf
+	app.ErrWriter = &buf
+
+	err := app.Run([]string{"eth-deposit-tx", "build", "--network", "holesky", "--input-file", badFile})
+	if err == nil {
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
+}
+
+func TestBuildSubcommand_Action_IndexOutOfBounds(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	fixture := fixtureAbsPath(t)
+
+	app := newTestApp()
+	var buf bytes.Buffer
+	app.Writer = &buf
+	app.ErrWriter = &buf
+
+	// fixture has 1 entry (index 0); request index 5
+	err := app.Run([]string{"eth-deposit-tx", "build", "--network", "holesky",
+		"--input-file", fixture, "--index", "5"})
+	if err == nil {
+		t.Fatal("expected error for out-of-bounds index, got nil")
 	}
 }
 
@@ -146,4 +290,14 @@ func newTestApp() *ucli.App {
 		Version:  "dev",
 		Commands: []*ucli.Command{buildCommand(), signCommand()},
 	}
+}
+
+// fixtureAbsPath returns the absolute path to the shared test deposit fixture.
+func fixtureAbsPath(t *testing.T) string {
+	t.Helper()
+	abs, err := filepath.Abs("testdata/deposit-fixture.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return abs
 }
