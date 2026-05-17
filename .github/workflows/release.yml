@@ -197,6 +197,13 @@ jobs:
       - name: Mark workspace as a safe git directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # anchore/sbom-action's install-syft helper invokes unzip during setup,
+      # which the goreleaser-cross container does not ship by default.
+      - name: Install unzip (required by anchore/sbom-action)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends unzip
+
       - name: Run GoReleaser
         run: goreleaser release --clean
         env:
