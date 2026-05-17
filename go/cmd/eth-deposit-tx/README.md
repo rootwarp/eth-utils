@@ -120,11 +120,37 @@ Flag values take precedence over environment variables.
 - Mainnet deposit transactions are **irreversible**. Verify the `to` address and `value` fields in `unsigned.json` before signing.
 - No private key material is ever logged, written to disk, or included in error messages by this tool.
 
+## Phase 3 golden artifact
+
+A deterministic local-signer test fixture lives in `testdata/phase3/holesky/`:
+
+- `unsigned_tx.json` — Holesky deposit tx (copied from Phase 2 golden)
+- `private_key.txt` — synthetic key `0x0101...0101` (NEVER use with real funds)
+- `signed_tx_golden.json` — signed output produced by the CLI with the synthetic key
+
+SHA256 of the golden: `67c1f5a9b2f595892b0aad06104211405c2ad67d2da16cba815c03e26f80ccf2`
+
+`TestPhase3_HoleskyLocalSignerGolden` asserts byte-for-byte equality on every `go test` run. Regenerate with `UPDATE_PHASE3_GOLDEN=1 go test ./cmd/eth-deposit-tx/...`.
+
+## Phase 3 hardware smoke test
+
+Developers with a Ledger device can follow the manual procedure in [`docs/deposit-tx/validation/phase-3-ledger-runbook.md`](../../docs/deposit-tx/validation/phase-3-ledger-runbook.md).
+
+The runbook covers: prerequisites, building with CGO, generating an unsigned tx, confirming on-device display (chainId 17000, to `0x4242...4242`, 32 ETH), verifying the signed output, and optional broadcast via `cast`.
+
+## Security review
+
+See [`docs/deposit-tx/security/phase-3-signer.md`](../../docs/deposit-tx/security/phase-3-signer.md) for:
+
+- Security properties verified by code (no-key-in-flag, key zeroization, no-key-in-errors, sender recovery, sentinel exit codes, 0o600 output permissions)
+- Known limitations (LocalSigner dev-only, heuristic patterns, goroutine trade-off)
+- Audit grep commands to re-verify key properties
+
 ## Status and roadmap
 
 - **Phase 1 (done):** CLI scaffold, config resolution, stub `build` command producing unsigned tx JSON.
 - **Phase 2 (done):** Real ABI encoding for `deposit(bytes,bytes,bytes,bytes32)`. Output is fully ABI-accurate. Golden artifact and round-trip decode tests committed.
-- **Phase 3 (done):** `sign` command — Ledger hardware wallet (primary) and `ETH_DEPOSIT_TX_PRIVATE_KEY` env-var fallback (with strong warnings). Both signers fully implemented and tested.
+- **Phase 3 (done):** `sign` command — Ledger hardware wallet (primary) and `ETH_DEPOSIT_TX_PRIVATE_KEY` env-var fallback (with strong warnings). Both signers fully implemented and tested. Security review, golden artifact, and hardware runbook committed. Pending: first successful hardware test on real device.
 - **Phase 4:** Optional `broadcast` command to submit the signed transaction via JSON-RPC; also wires `--rpc-url` for live gas/nonce estimation.
 
 ## For contributors
@@ -136,3 +162,5 @@ Flag values take precedence over environment variables.
 - [Phase 2 issues](../../docs/deposit-tx/issues/phase-2-tx-builder.md)
 - [Phase 3 issues](../../docs/deposit-tx/issues/phase-3-signer.md)
 - [Phase 2 validation artifact](../../docs/deposit-tx/validation/phase-2-unsigned-tx.md)
+- [Phase 3 security review](../../docs/deposit-tx/security/phase-3-signer.md)
+- [Phase 3 Ledger runbook](../../docs/deposit-tx/validation/phase-3-ledger-runbook.md)
