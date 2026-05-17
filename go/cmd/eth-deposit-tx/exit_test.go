@@ -58,11 +58,11 @@ func TestWrapInputErr(t *testing.T) {
 // wrapped via WrapInputErr routes to exit code 2 via the ErrInvalidInput
 // sentinel branch (not the ucli.ExitCoder branch).
 func TestExitCodeFor_BuildUnsignedErrorPath(t *testing.T) {
-	err := WrapInputErr("build", internaltx.ErrNilFeeField)
+	err := WrapInputErr("build", internaltx.ErrMissingFeeStatic)
 	if !errors.Is(err, ErrInvalidInput) {
-		t.Error("WrapInputErr(build, ErrNilFeeField) must satisfy errors.Is(ErrInvalidInput)")
+		t.Error("WrapInputErr(build, ErrMissingFeeStatic) must satisfy errors.Is(ErrInvalidInput)")
 	}
 	if got := ExitCodeFor(err); got != 2 {
-		t.Errorf("ExitCodeFor(WrapInputErr(build, ErrNilFeeField)) = %d, want 2", got)
+		t.Errorf("ExitCodeFor(WrapInputErr(build, ErrMissingFeeStatic)) = %d, want 2", got)
 	}
 }
