@@ -3,10 +3,11 @@ package tx
 import "errors"
 
 var (
-	// ErrNilContext, ErrNilFeeField, ErrInvalidAmount are declared in builder.go
-	// and stub_builder.go respectively; they are consolidated here in a later issue.
+	// ErrNilFeeField is kept for callers that test error wrapping; the stub builder
+	// that previously returned it has been removed. New code should use ErrMissingFeeStatic.
+	ErrNilFeeField = errors.New("fee field must not be nil")
 
-	ErrZeroPubkey          = errors.New("pubkey is all zeros")
+	ErrZeroPubkey = errors.New("pubkey is all zeros")
 	ErrZeroSignature       = errors.New("signature is all zeros")
 	ErrZeroDepositRoot     = errors.New("deposit_data_root is all zeros")
 	ErrInvalidWCPrefix     = errors.New("withdrawal credentials prefix must be 0x00, 0x01, or 0x02")
