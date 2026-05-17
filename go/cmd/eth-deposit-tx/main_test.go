@@ -310,6 +310,30 @@ func TestBuildSubcommand_Action_BadNetwork(t *testing.T) {
 	}
 }
 
+func TestBuildSubcommand_InputAlias(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	app := newTestApp()
+	var out bytes.Buffer
+	app.Writer = &out
+	app.ErrWriter = &bytes.Buffer{}
+
+	// --input is an alias for --input-file on build.
+	err := app.Run([]string{
+		"eth-deposit-tx", "build",
+		"--network", "holesky",
+		"--input", fixtureAbsPath(t),
+	})
+	if err != nil {
+		t.Fatalf("--input alias: unexpected error: %v", err)
+	}
+	if !json.Valid(out.Bytes()) {
+		t.Errorf("--input alias: output is not valid JSON: %s", out.String())
+	}
+}
+
 func TestBuildSubcommand_Action_OutputDash_IsStdout(t *testing.T) {
 	orig := ucli.OsExiter
 	ucli.OsExiter = func(code int) {}
