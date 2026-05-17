@@ -29,6 +29,8 @@ import (
 
 // version, commit, and date are set at build time via -ldflags.
 // Default values are used for local/dev builds.
+// Canonical first release: v0.1.0 — signals first usable release, not yet
+// feature-complete vs roadmap (mainnet Ledger heuristics deferred to v0.2.0).
 var (
 	version = "dev"
 	commit  = "none"
