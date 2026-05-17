@@ -101,20 +101,6 @@ func TestValidate_Table(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name: "nil MaxFeePerGas",
-			mutate: func(_ *deposit.Entry, c *BuildConfig) {
-				c.MaxFeePerGas = nil
-			},
-			wantErr: ErrNilFeeField,
-		},
-		{
-			name: "nil MaxPriorityFeePerGas",
-			mutate: func(_ *deposit.Entry, c *BuildConfig) {
-				c.MaxPriorityFeePerGas = nil
-			},
-			wantErr: ErrNilFeeField,
-		},
-		{
 			name: "chain ID zero",
 			mutate: func(_ *deposit.Entry, c *BuildConfig) {
 				c.NetworkParams.ChainID = 0

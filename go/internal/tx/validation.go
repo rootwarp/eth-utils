@@ -6,8 +6,9 @@ import (
 	"github.com/rootwarp/eth-utils/go/internal/deposit"
 )
 
-// Validate runs all input-validity checks for BuildUnsigned. Returns the
-// first error encountered, or nil if the entry and config are acceptable.
+// Validate runs entry-level and network-level checks for BuildUnsigned. It does
+// NOT check fee/nonce/gas fields — those are resolved before this call when RPC
+// is provided, or checked by validateStaticConfig when RPC is nil.
 //
 // Length note: deposit.Entry uses fixed-size byte arrays ([48]byte, [96]byte,
 // etc.), so Go's type system enforces lengths at compile time. We satisfy the
@@ -17,13 +18,6 @@ import (
 // can do this, but enabling it requires all test fixtures to carry real G1
 // points, which is a significant lift for an "optional" check.
 func Validate(entry deposit.Entry, cfg BuildConfig) error {
-	// Config checks first so fee-nil tests short-circuit before entry checks.
-	if cfg.MaxFeePerGas == nil {
-		return fmt.Errorf("BuildConfig.MaxFeePerGas: %w", ErrNilFeeField)
-	}
-	if cfg.MaxPriorityFeePerGas == nil {
-		return fmt.Errorf("BuildConfig.MaxPriorityFeePerGas: %w", ErrNilFeeField)
-	}
 	if cfg.NetworkParams.ChainID == 0 {
 		return ErrUnconfiguredChainID
 	}
@@ -60,5 +54,24 @@ func Validate(entry deposit.Entry, cfg BuildConfig) error {
 		return fmt.Errorf("%w: got 0x%02x", ErrInvalidWCPrefix, wc[0])
 	}
 
+	return nil
+}
+
+// validateStaticConfig checks that all gas/fee/nonce fields are explicitly set
+// when no RPC is provided. Called by BuildUnsigned before field resolution when
+// cfg.RPC == nil.
+func validateStaticConfig(cfg BuildConfig) error {
+	if cfg.MaxFeePerGas == nil {
+		return ErrMissingFeeStatic
+	}
+	if cfg.MaxPriorityFeePerGas == nil {
+		return ErrMissingPriorityFeeStatic
+	}
+	if cfg.Nonce == nil {
+		return ErrMissingNonceStatic
+	}
+	if cfg.GasLimit == 0 {
+		return ErrMissingGasLimitStatic
+	}
 	return nil
 }

@@ -31,8 +31,12 @@ func NewBuilder() *Builder {
 	return &Builder{}
 }
 
-// BuildUnsigned constructs an unsigned EIP-1559 deposit transaction with
-// real ABI-encoded calldata for the deposit() function.
+// BuildUnsigned constructs an unsigned EIP-1559 deposit transaction.
+//
+// Resolution order per field:
+//  1. If the field is explicitly set in cfg, it wins.
+//  2. If cfg.RPC != nil and the field is unset, resolve from RPC.
+//  3. If cfg.RPC == nil and the field is unset, return ErrMissing* sentinel.
 func (b *Builder) BuildUnsigned(ctx context.Context, entry deposit.Entry, cfg BuildConfig) (*UnsignedTx, error) {
 	if ctx == nil {
 		return nil, ErrNilContext
@@ -45,9 +49,10 @@ func (b *Builder) BuildUnsigned(ctx context.Context, entry deposit.Entry, cfg Bu
 		return nil, err
 	}
 
-	nonce := uint64(0)
-	if cfg.Nonce != nil {
-		nonce = *cfg.Nonce
+	// Resolve or validate gas/fee/nonce fields.
+	gasLimit, maxFee, tip, nonce, err := resolveFields(ctx, cfg, entry)
+	if err != nil {
+		return nil, err
 	}
 
 	calldata := PackDeposit(entry.Pubkey, entry.WithdrawalCredentials, entry.Signature, entry.DepositDataRoot)
@@ -57,10 +62,104 @@ func (b *Builder) BuildUnsigned(ctx context.Context, entry deposit.Entry, cfg Bu
 		To:                   cfg.NetworkParams.DepositContractAddressHex(),
 		Value:                "0x" + fmt.Sprintf("%x", value32ETH),
 		Data:                 "0x" + hex.EncodeToString(calldata),
-		Gas:                  cfg.GasLimit,
-		MaxFeePerGas:         "0x" + fmt.Sprintf("%x", cfg.MaxFeePerGas),
-		MaxPriorityFeePerGas: "0x" + fmt.Sprintf("%x", cfg.MaxPriorityFeePerGas),
+		Gas:                  gasLimit,
+		MaxFeePerGas:         "0x" + fmt.Sprintf("%x", maxFee),
+		MaxPriorityFeePerGas: "0x" + fmt.Sprintf("%x", tip),
 		Nonce:                nonce,
 		Type:                 "0x2",
 	}, nil
+}
+
+// resolveFields determines the final gas limit, max fee, priority fee, and nonce.
+// When cfg.RPC is nil it validates that all fields are statically provided.
+// When cfg.RPC is non-nil it fetches any missing values and optionally verifies
+// that the RPC's chain ID matches the configured network.
+func resolveFields(ctx context.Context, cfg BuildConfig, entry deposit.Entry) (gasLimit uint64, maxFee, tip *big.Int, nonce uint64, err error) {
+	if cfg.RPC == nil {
+		return resolveStatic(cfg)
+	}
+	return resolveRPC(ctx, cfg, entry)
+}
+
+func resolveStatic(cfg BuildConfig) (uint64, *big.Int, *big.Int, uint64, error) {
+	if err := validateStaticConfig(cfg); err != nil {
+		return 0, nil, nil, 0, err
+	}
+	return cfg.GasLimit, cfg.MaxFeePerGas, cfg.MaxPriorityFeePerGas, *cfg.Nonce, nil
+}
+
+func resolveRPC(ctx context.Context, cfg BuildConfig, entry deposit.Entry) (gasLimit uint64, maxFee, tip *big.Int, nonce uint64, err error) {
+	// Optional: verify chain ID matches.
+	if rpcChainID, chainErr := cfg.RPC.ChainID(ctx); chainErr == nil {
+		if rpcChainID != nil && rpcChainID.Sign() != 0 {
+			configured := new(big.Int).SetUint64(uint64(cfg.NetworkParams.ChainID))
+			if rpcChainID.Cmp(configured) != 0 {
+				return 0, nil, nil, 0, fmt.Errorf("%w: RPC=%s configured=%s",
+					ErrChainIDMismatch, rpcChainID, configured)
+			}
+		}
+	}
+	// ChainID call errors are silently ignored (warn-and-continue semantics).
+
+	// Resolve priority fee (tip).
+	tip = cfg.MaxPriorityFeePerGas
+	if tip == nil {
+		tip, err = cfg.RPC.SuggestGasTipCap(ctx)
+		if err != nil {
+			return 0, nil, nil, 0, fmt.Errorf("SuggestGasTipCap: %w", err)
+		}
+	}
+
+	// Resolve max fee = 2*baseFee + tip (EIP-1559 standard formula).
+	maxFee = cfg.MaxFeePerGas
+	if maxFee == nil {
+		baseFee, bErr := cfg.RPC.BlockBaseFee(ctx)
+		if bErr != nil {
+			return 0, nil, nil, 0, fmt.Errorf("BlockBaseFee: %w", bErr)
+		}
+		// maxFeePerGas = 2 * baseFee + tip
+		maxFee = new(big.Int).Add(new(big.Int).Mul(big.NewInt(2), baseFee), tip)
+	}
+
+	// Resolve nonce.
+	if cfg.Nonce != nil {
+		nonce = *cfg.Nonce
+	} else {
+		if cfg.From == ([20]byte{}) {
+			return 0, nil, nil, 0, ErrMissingFromForNonce
+		}
+		nonce, err = cfg.RPC.PendingNonceAt(ctx, cfg.From)
+		if err != nil {
+			return 0, nil, nil, 0, fmt.Errorf("PendingNonceAt: %w", err)
+		}
+	}
+
+	// Resolve gas limit.
+	gasLimit = cfg.GasLimit
+	if gasLimit == 0 {
+		var toAddr [20]byte
+		contractHex := cfg.NetworkParams.DepositContractAddressHex()
+		if len(contractHex) >= 42 {
+			b, hErr := hex.DecodeString(contractHex[2:])
+			if hErr == nil && len(b) == 20 {
+				copy(toAddr[:], b)
+			}
+		}
+
+		calldata := PackDeposit(entry.Pubkey, entry.WithdrawalCredentials, entry.Signature, entry.DepositDataRoot)
+		msg := CallMsg{
+			From:  cfg.From,
+			To:    toAddr,
+			Value: value32ETH,
+			Data:  calldata,
+		}
+		estimate, eErr := cfg.RPC.EstimateGas(ctx, msg)
+		if eErr != nil {
+			return 0, nil, nil, 0, fmt.Errorf("EstimateGas: %w", eErr)
+		}
+		// 20% safety margin: estimate * 6 / 5
+		gasLimit = estimate * 6 / 5
+	}
+
+	return gasLimit, maxFee, tip, nonce, nil
 }
