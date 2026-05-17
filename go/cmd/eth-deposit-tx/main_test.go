@@ -119,8 +119,11 @@ func TestSignSubcommand_Help(t *testing.T) {
 	_ = app.Run([]string{"eth-deposit-tx", "sign", "--help"})
 
 	s := buf.String()
+	if !strings.Contains(s, "signer") {
+		t.Errorf("sign --help missing expected --signer flag, got: %s", s)
+	}
 	if !strings.Contains(s, "ledger") {
-		t.Errorf("sign --help missing expected ledger flag, got: %s", s)
+		t.Errorf("sign --help missing ledger mention, got: %s", s)
 	}
 }
 
@@ -307,25 +310,6 @@ func TestBuildSubcommand_Action_BadNetwork(t *testing.T) {
 	}
 }
 
-func TestSignSubcommand_Action(t *testing.T) {
-	orig := ucli.OsExiter
-	ucli.OsExiter = func(code int) {}
-	t.Cleanup(func() { ucli.OsExiter = orig })
-
-	app := newTestApp()
-	var out bytes.Buffer
-	app.Writer = &out
-	app.ErrWriter = &out
-
-	err := app.Run([]string{"eth-deposit-tx", "sign", "--input", "unsigned.hex"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	s := out.String()
-	if !strings.Contains(s, "not yet implemented") {
-		t.Errorf("sign action output unexpected: %s", s)
-	}
-}
 
 // newTestApp returns a minimal app instance for testing (avoids side effects of the real main).
 func newTestApp() *ucli.App {

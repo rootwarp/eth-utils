@@ -5,8 +5,8 @@
 //
 //	0 — success
 //	2 — user / configuration error (bad input, unknown network, missing file, etc.)
-//	3 — signer / crypto error (reserved for Phase 3)
-//	4 — user abort (SIGINT)
+//	3 — signer / crypto error (bad key, no device, app not open, chain ID mismatch)
+//	4 — user abort (SIGINT or Ledger rejection)
 //	1 — unexpected / internal error
 package main
 
@@ -55,7 +55,7 @@ It supports a secure two-phase workflow:
 
 The tool produces standard hex-encoded RLP output ready for eth_sendRawTransaction.
 
-Exit codes: 0=success, 1=internal error, 2=bad input, 3=signer error (Phase 3), 4=user abort.`,
+Exit codes: 0=success, 1=internal error, 2=bad input, 3=signer/crypto error, 4=user abort.`,
 		Commands: []*ucli.Command{
 			buildCommand(),
 			signCommand(),
@@ -222,36 +222,3 @@ Example (read deposit data from stdin):
 	}
 }
 
-func signCommand() *ucli.Command {
-	return &ucli.Command{
-		Name:  "sign",
-		Usage: "Sign a previously built unsigned deposit transaction",
-		Description: `NOT YET IMPLEMENTED — coming in Phase 3.
-
-Will sign an unsigned transaction produced by "eth-deposit-tx build".
-Primary signing method is Ledger hardware wallet. A local private-key fallback
-will be available via the ETH_DEPOSIT_TX_PRIVATE_KEY environment variable
-(with strong warnings).`,
-		UsageText: `eth-deposit-tx sign --input FILE [--ledger | --private-key]`,
-		Flags: []ucli.Flag{
-			&ucli.StringFlag{
-				Name:     "input",
-				Aliases:  []string{"i"},
-				Usage:    "Path to the unsigned transaction (from build) or '-' for stdin",
-				Required: true,
-			},
-			&ucli.BoolFlag{
-				Name:  "ledger",
-				Usage: "Sign using a connected Ledger device (default primary method)",
-			},
-			&ucli.StringFlag{
-				Name:  "output",
-				Usage: "Output file for the signed transaction (default: stdout)",
-			},
-		},
-		Action: func(c *ucli.Context) error {
-			fmt.Fprintf(c.App.Writer, "sign: not yet implemented — coming in Phase 3\n")
-			return nil
-		},
-	}
-}

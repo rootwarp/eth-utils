@@ -8,6 +8,7 @@ import (
 
 	ucli "github.com/urfave/cli/v2"
 
+	"github.com/rootwarp/eth-utils/go/internal/signer"
 	internaltx "github.com/rootwarp/eth-utils/go/internal/tx"
 )
 
@@ -27,6 +28,18 @@ func TestExitCodeFor(t *testing.T) {
 		{"ucli.Exit code 2", ucli.Exit("bad input", 2), 2},
 		{"ucli.Exit code 1", ucli.Exit("other", 1), 1},
 		{"unknown error", errors.New("some unexpected error"), 1},
+		// Signer sentinel errors → exit 3.
+		{"ErrSignerClosed direct", signer.ErrSignerClosed, 3},
+		{"ErrNoDevice direct", signer.ErrNoDevice, 3},
+		{"ErrAppNotOpen direct", signer.ErrAppNotOpen, 3},
+		{"ErrInvalidKey direct", signer.ErrInvalidKey, 3},
+		{"ErrInvalidChainID direct", signer.ErrInvalidChainID, 3},
+		{"ErrChainIDMismatch direct", signer.ErrChainIDMismatch, 3},
+		{"ErrLedgerNotSupported direct", signer.ErrLedgerNotSupported, 3},
+		{"ErrSignerClosed wrapped", fmt.Errorf("sign: %w", signer.ErrSignerClosed), 3},
+		// User rejection → exit 4.
+		{"ErrUserRejected direct", signer.ErrUserRejected, 4},
+		{"ErrUserRejected wrapped", fmt.Errorf("ledger: %w", signer.ErrUserRejected), 4},
 	}
 
 	for _, tc := range cases {

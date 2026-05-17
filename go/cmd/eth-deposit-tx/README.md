@@ -2,7 +2,7 @@
 
 Build and sign Ethereum Beacon Chain deposit transactions from Launchpad-compatible `deposit_data` JSON.
 
-**Phase 2 status:** the `build` command now produces a fully ABI-accurate unsigned EIP-1559 transaction with correct 420-byte `deposit(bytes,bytes,bytes,bytes32)` calldata. Signing arrives in Phase 3.
+**Phase 3 status:** both `build` and `sign` commands work end-to-end. The `sign` command supports local private-key signing (for development/CI) and Ledger hardware wallet signing (recommended for real funds).
 
 > Note: `--rpc-url` is accepted by the CLI for forward compatibility but is not yet wired to a live RPC client. The `build` command currently operates in static-config mode only — provide gas/fee/nonce flags explicitly or rely on defaults. RPC-based gas/nonce estimation will be plumbed in Phase 4.
 
@@ -11,13 +11,13 @@ Build and sign Ethereum Beacon Chain deposit transactions from Launchpad-compati
 `eth-deposit-tx` converts the `deposit_data` JSON produced by `eth-deposit-gen` (or the official Ethereum Launchpad) into raw Ethereum transactions ready for the Beacon Chain deposit contract. It is designed around a secure two-phase workflow:
 
 1. **build** — construct an unsigned transaction (can run fully offline / air-gapped)
-2. **sign** — sign the transaction, primarily via Ledger hardware wallet *(Phase 3)*
+2. **sign** — sign the transaction, primarily via Ledger hardware wallet
 
 The two phases are intentionally separate so the unsigned transaction can be produced on an online machine and then transferred to a signing device that never touches the internet.
 
 ## Install
 
-Pure Go — no CGO required.
+Requires CGO (transitively via BLS library).
 
 ```bash
 # from the go/ module root
@@ -27,33 +27,9 @@ go install ./cmd/eth-deposit-tx
 go build -o eth-deposit-tx ./cmd/eth-deposit-tx
 ```
 
-## Quick Start (Phase 2)
+## Quick Start (Phase 3)
 
-Use the included test fixture to exercise the build command:
-
-```bash
-go run ./cmd/eth-deposit-tx build \
-  --network holesky \
-  --input-file ./cmd/eth-deposit-tx/testdata/deposit-fixture.json
-```
-
-Expected output (ABI-accurate, 420-byte calldata):
-
-```json
-{
-  "chainId": 17000,
-  "to": "0x4242424242424242424242424242424242424242",
-  "value": "0x1bc16d674ec800000",
-  "data": "0x22895118<420-byte ABI-encoded deposit() calldata>",
-  "gas": 250000,
-  "maxFeePerGas": "0x4a817c800",
-  "maxPriorityFeePerGas": "0x3b9aca00",
-  "nonce": 0,
-  "type": "0x2"
-}
-```
-
-Write the unsigned transaction to a file:
+**Step 1 — build the unsigned transaction:**
 
 ```bash
 eth-deposit-tx build \
@@ -62,10 +38,25 @@ eth-deposit-tx build \
   --output unsigned.json
 ```
 
-Read deposit data from stdin:
+**Step 2a — sign with Ledger (recommended):**
 
 ```bash
-cat deposit_data.json | eth-deposit-tx build --network holesky --input-file -
+# Prerequisites: Ledger device connected via USB, Ethereum app open on device.
+eth-deposit-tx sign \
+  --signer ledger \
+  --input unsigned.json \
+  --output signed.json
+```
+
+**Step 2b — sign with local key (development / CI only):**
+
+```bash
+# WARNING: for development only. Never use real-fund keys this way.
+export ETH_DEPOSIT_TX_PRIVATE_KEY=0x<your-dev-hex-private-key>
+eth-deposit-tx sign \
+  --signer local \
+  --input unsigned.json \
+  --output signed.json
 ```
 
 ## Flag reference
@@ -84,6 +75,15 @@ cat deposit_data.json | eth-deposit-tx build --network holesky --input-file -
 | `--max-priority-fee-per-gas` | `ETH_DEPOSIT_TX_MAX_PRIORITY_FEE_PER_GAS` | `1000000000` (1 Gwei) | EIP-1559 priority fee per gas in wei |
 | `--nonce` | `ETH_DEPOSIT_TX_NONCE` | `0` | Explicit sender nonce override |
 
+### `sign` subcommand
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--signer` | *(required)* | Signing method: `local` or `ledger` |
+| `--input`, `-i` | *(required)* | Path to unsigned tx JSON (from `build`), or `-` for stdin |
+| `--output`, `-o` | stdout | Output file for the signed transaction |
+| `--private-key-env` | `ETH_DEPOSIT_TX_PRIVATE_KEY` | Env var name holding the hex private key (local signer only) |
+
 Flag values take precedence over environment variables.
 
 ## Exit codes
@@ -92,23 +92,40 @@ Flag values take precedence over environment variables.
 |------|-----------|
 | 0 | Success |
 | 1 | Unexpected / internal error |
-| 2 | User / configuration error (bad input, unknown network, missing file, invalid value) |
-| 3 | Signer / crypto error *(reserved for Phase 3)* |
-| 4 | User abort (SIGINT / Ctrl-C) |
+| 2 | User / configuration error (bad input, unknown network, missing file, invalid `--signer`) |
+| 3 | Signer / crypto error (bad private key, no Ledger device, Ethereum app not open, chain ID mismatch) |
+| 4 | User abort (SIGINT / Ctrl-C, or transaction rejected on Ledger device) |
+
+## Security
+
+### Local signer (`--signer local`)
+
+- **For development and CI only. Never use with real-fund keys.**
+- The private key is read from the environment variable named by `--private-key-env` (default: `ETH_DEPOSIT_TX_PRIVATE_KEY`). It must never be passed as a CLI argument — that would expose it in shell history and process listings.
+- Key bytes are zeroized in memory when the signer is closed. They never appear in log output or error messages.
+- If `ETH_DEPOSIT_TX_PRIVATE_KEY` is set in your shell, unset it after signing: `unset ETH_DEPOSIT_TX_PRIVATE_KEY`.
+
+### Ledger signer (`--signer ledger`)
+
+- The private key never leaves the device. This is the **recommended path** for all real-fund operations.
+- Prerequisites before running:
+  1. Connect your Ledger device via USB.
+  2. Unlock the device.
+  3. Open the **Ethereum** app on the device.
+- The tool derives the sender address at `m/44'/60'/0'/0/0` (BIP-44 default Ethereum path). Verify the displayed address on your device screen.
+- The user must confirm the transaction on the device. Rejection or Ctrl-C exits with code 4.
+
+### General
+
+- Mainnet deposit transactions are **irreversible**. Verify the `to` address and `value` fields in `unsigned.json` before signing.
+- No private key material is ever logged, written to disk, or included in error messages by this tool.
 
 ## Status and roadmap
 
 - **Phase 1 (done):** CLI scaffold, config resolution, stub `build` command producing unsigned tx JSON.
-- **Phase 2 (done):** Real ABI encoding for `deposit(bytes,bytes,bytes,bytes32)`. Output is fully ABI-accurate. Golden artifact and round-trip decode tests committed. `sign` is not yet implemented.
-- **Phase 3 (next):** `sign` command — Ledger hardware wallet (primary) and `ETH_DEPOSIT_TX_PRIVATE_KEY` env-var fallback (with strong warnings).
+- **Phase 2 (done):** Real ABI encoding for `deposit(bytes,bytes,bytes,bytes32)`. Output is fully ABI-accurate. Golden artifact and round-trip decode tests committed.
+- **Phase 3 (done):** `sign` command — Ledger hardware wallet (primary) and `ETH_DEPOSIT_TX_PRIVATE_KEY` env-var fallback (with strong warnings). Both signers fully implemented and tested.
 - **Phase 4:** Optional `broadcast` command to submit the signed transaction via JSON-RPC; also wires `--rpc-url` for live gas/nonce estimation.
-
-## Security notes
-
-- No signing occurs in Phase 2. The unsigned transaction JSON contains no key material.
-- Phase 3 will handle private keys exclusively via the `ETH_DEPOSIT_TX_PRIVATE_KEY` environment variable — never as a CLI flag — to avoid exposure in shell history and process listings.
-- Ledger hardware wallet signing is the preferred path; the env-var key is a last-resort fallback.
-- Mainnet deposit transactions are **irreversible**. Verify the `to` address and `value` fields before signing.
 
 ## For contributors
 
@@ -117,4 +134,5 @@ Flag values take precedence over environment variables.
 - [Project plan](../../docs/deposit-tx/project-plan.md)
 - [Phase 1 issues](../../docs/deposit-tx/issues/phase-1-foundation.md)
 - [Phase 2 issues](../../docs/deposit-tx/issues/phase-2-tx-builder.md)
+- [Phase 3 issues](../../docs/deposit-tx/issues/phase-3-signer.md)
 - [Phase 2 validation artifact](../../docs/deposit-tx/validation/phase-2-unsigned-tx.md)

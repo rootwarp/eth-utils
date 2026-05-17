@@ -3,8 +3,9 @@
 //	0 — success
 //	2 — user / configuration errors (bad input, validation, unknown network,
 //	    missing/malformed file, invalid hex, out-of-bounds --index, negative fees)
-//	3 — signer / crypto errors (reserved for Phase 3; no callers yet)
-//	4 — user abort (SIGINT / context.Canceled)
+//	3 — signer / crypto errors (bad key, no Ledger device, Ethereum app not open,
+//	    chain ID mismatch, signer closed)
+//	4 — user abort (SIGINT / context.Canceled / Ledger device rejection)
 //	1 — fallback for any other error
 package main
 
@@ -14,6 +15,8 @@ import (
 	"fmt"
 
 	ucli "github.com/urfave/cli/v2"
+
+	"github.com/rootwarp/eth-utils/go/internal/signer"
 )
 
 // ErrInvalidInput is the sentinel for user / configuration errors (exit code 2).
@@ -41,7 +44,20 @@ func ExitCodeFor(err error) int {
 	if errors.As(err, &ec) && ec.ExitCode() == 2 {
 		return 2
 	}
-	// Exit code 3 is reserved for Phase 3 signer/crypto errors.
+	// Exit code 4: user rejected signing on hardware device.
+	if errors.Is(err, signer.ErrUserRejected) {
+		return 4
+	}
+	// Exit code 3: signer / crypto errors.
+	if errors.Is(err, signer.ErrSignerClosed) ||
+		errors.Is(err, signer.ErrNoDevice) ||
+		errors.Is(err, signer.ErrAppNotOpen) ||
+		errors.Is(err, signer.ErrInvalidKey) ||
+		errors.Is(err, signer.ErrInvalidChainID) ||
+		errors.Is(err, signer.ErrChainIDMismatch) ||
+		errors.Is(err, signer.ErrLedgerNotSupported) {
+		return 3
+	}
 	// Fallback.
 	return 1
 }
