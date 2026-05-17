@@ -163,7 +163,7 @@ eth-deposit-gen \
   --verify-with-deposit-cli
 ```
 
-If the `deposit` binary is not in `PATH`, or a custom path was given via `--deposit-cli-path`, the command exits with code 2. If verification fails, it exits with code 3.
+If the `deposit` binary (or the binary named by `--deposit-cli-path`) is not found in PATH, the command exits with code 2. If verification fails, it exits with code 3.
 
 ## Security notes
 
@@ -203,7 +203,7 @@ Two safe sourcing modes are supported:
 ### Wrong passphrase
 
 ```text
-keystore load failed: wrong passphrase
+wrong passphrase: <underlying crypto error>
 ```
 
 The passphrase supplied via `--passphrase-env` or the TTY prompt does not decrypt the keystore. Exits with code 3.

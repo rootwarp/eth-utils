@@ -31,10 +31,6 @@ echo "==> Building eth-deposit-gen"
 TMPDIR_BASE=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_BASE"' EXIT
 
-awk '/^```bash$/{found=1; block=""; next} found && /^```$/{found=0; print block > "/dev/stderr"; print block; block=""; next} found{block=block"\n"$0}' "$README" \
-  | csplit --quiet --elide-empty-files - '/^$/' '{*}' --prefix="$TMPDIR_BASE/block_" --suffix-format='%03d.sh' 2>/dev/null || true
-
-# Alternatively use a simpler Python-based extractor:
 python3 - "$README" "$TMPDIR_BASE" <<'PYEOF'
 import sys, re, os, pathlib
 
