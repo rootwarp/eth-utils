@@ -2,7 +2,9 @@
 
 Build and sign Ethereum Beacon Chain deposit transactions from Launchpad-compatible `deposit_data` JSON.
 
-**Phase 1 status:** the `build` command produces a structurally correct unsigned EIP-1559 transaction using a stub calldata builder. Real ABI encoding arrives in Phase 2; signing arrives in Phase 3.
+**Phase 2 status:** the `build` command now produces a fully ABI-accurate unsigned EIP-1559 transaction with correct 420-byte `deposit(bytes,bytes,bytes,bytes32)` calldata. Signing arrives in Phase 3.
+
+> Note: `--rpc-url` is accepted by the CLI for forward compatibility but is not yet wired to a live RPC client. The `build` command currently operates in static-config mode only — provide gas/fee/nonce flags explicitly or rely on defaults. RPC-based gas/nonce estimation will be plumbed in Phase 4.
 
 ## Overview
 
@@ -25,7 +27,7 @@ go install ./cmd/eth-deposit-tx
 go build -o eth-deposit-tx ./cmd/eth-deposit-tx
 ```
 
-## Quick Start (Phase 1)
+## Quick Start (Phase 2)
 
 Use the included test fixture to exercise the build command:
 
@@ -35,14 +37,14 @@ go run ./cmd/eth-deposit-tx build \
   --input-file ./cmd/eth-deposit-tx/testdata/deposit-fixture.json
 ```
 
-Expected output (stub values — not ABI-accurate until Phase 2):
+Expected output (ABI-accurate, 420-byte calldata):
 
 ```json
 {
   "chainId": 17000,
   "to": "0x4242424242424242424242424242424242424242",
   "value": "0x1bc16d674ec800000",
-  "data": "0x22895118aaa...ccc",
+  "data": "0x22895118<420-byte ABI-encoded deposit() calldata>",
   "gas": 250000,
   "maxFeePerGas": "0x4a817c800",
   "maxPriorityFeePerGas": "0x3b9aca00",
@@ -96,14 +98,14 @@ Flag values take precedence over environment variables.
 
 ## Status and roadmap
 
-- **Phase 1 (current):** CLI scaffold, config resolution, stub `build` command producing unsigned tx JSON. `sign` is not yet implemented.
-- **Phase 2:** Real ABI encoding for `deposit(bytes,bytes,bytes,bytes32)` replaces the stub calldata builder. Output becomes fully valid for broadcasting.
-- **Phase 3:** `sign` command — Ledger hardware wallet (primary) and `ETH_DEPOSIT_TX_PRIVATE_KEY` env-var fallback (with strong warnings).
-- **Phase 4:** Optional `broadcast` command to submit the signed transaction via JSON-RPC.
+- **Phase 1 (done):** CLI scaffold, config resolution, stub `build` command producing unsigned tx JSON.
+- **Phase 2 (done):** Real ABI encoding for `deposit(bytes,bytes,bytes,bytes32)`. Output is fully ABI-accurate. Golden artifact and round-trip decode tests committed. `sign` is not yet implemented.
+- **Phase 3 (next):** `sign` command — Ledger hardware wallet (primary) and `ETH_DEPOSIT_TX_PRIVATE_KEY` env-var fallback (with strong warnings).
+- **Phase 4:** Optional `broadcast` command to submit the signed transaction via JSON-RPC; also wires `--rpc-url` for live gas/nonce estimation.
 
 ## Security notes
 
-- No signing occurs in Phase 1. The unsigned transaction JSON contains no key material.
+- No signing occurs in Phase 2. The unsigned transaction JSON contains no key material.
 - Phase 3 will handle private keys exclusively via the `ETH_DEPOSIT_TX_PRIVATE_KEY` environment variable — never as a CLI flag — to avoid exposure in shell history and process listings.
 - Ledger hardware wallet signing is the preferred path; the env-var key is a last-resort fallback.
 - Mainnet deposit transactions are **irreversible**. Verify the `to` address and `value` fields before signing.
@@ -114,3 +116,5 @@ Flag values take precedence over environment variables.
 - [Architecture](../../docs/deposit-tx/architecture.md)
 - [Project plan](../../docs/deposit-tx/project-plan.md)
 - [Phase 1 issues](../../docs/deposit-tx/issues/phase-1-foundation.md)
+- [Phase 2 issues](../../docs/deposit-tx/issues/phase-2-tx-builder.md)
+- [Phase 2 validation artifact](../../docs/deposit-tx/validation/phase-2-unsigned-tx.md)
