@@ -17,11 +17,17 @@ package signer
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"math/big"
+	"os"
 	"strings"
 	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 
 	internaltx "github.com/rootwarp/eth-utils/go/internal/tx"
 )
@@ -33,9 +39,10 @@ const ledgerSignerName = "ledger"
 //
 // Construct with NewLedgerSigner. Close must be called to release the HID handle.
 type LedgerSigner struct {
-	wallet  ledgerWallet
-	account accounts.Account
-	closed  atomic.Bool
+	wallet              ledgerWallet
+	account             accounts.Account
+	closed              atomic.Bool
+	confirmationPrompt  io.Writer
 }
 
 // NewLedgerSigner discovers the first connected Ledger, opens the Ethereum app,
@@ -65,7 +72,6 @@ func NewLedgerSigner() (*LedgerSigner, error) {
 	}
 
 	// Check Status — Open can succeed even when the Ethereum app isn't active.
-	// TODO(3.4): refine these heuristics once real hardware error messages are known.
 	_, statusErr := w.Status()
 	if statusErr != nil {
 		if isAppNotOpenErr(statusErr) {
@@ -82,26 +88,177 @@ func NewLedgerSigner() (*LedgerSigner, error) {
 		return nil, fmt.Errorf("ledger derive failed: %w", err)
 	}
 
-	return &LedgerSigner{wallet: w, account: acc}, nil
+	return &LedgerSigner{wallet: w, account: acc, confirmationPrompt: os.Stderr}, nil
+}
+
+// setConfirmationPrompt sets the writer for "please confirm on device" messages.
+// Used in tests to capture or silence the prompt.
+func (s *LedgerSigner) setConfirmationPrompt(w io.Writer) {
+	s.confirmationPrompt = w
 }
 
 // isAppNotOpenErr returns true when err suggests the Ethereum app is not open.
 // Matches known APDU error codes (6e00, 6e01, 6d00) and textual hints.
-// TODO(3.4): replace with exact string from real hardware test.
+// The textual heuristic requires both "app" AND ("not open" OR "open the") to
+// reduce false positives (e.g. "snapshot not found in app" no longer matches).
+// TODO(3.6): replace with exact strings from real hardware test.
 func isAppNotOpenErr(err error) bool {
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "6e00") || strings.Contains(msg, "6e01") || strings.Contains(msg, "6d00") {
 		return true
 	}
-	return strings.Contains(msg, "app") && (strings.Contains(msg, "not") || strings.Contains(msg, "open"))
+	return strings.Contains(msg, "app") &&
+		(strings.Contains(msg, "not open") || strings.Contains(msg, "open the"))
 }
 
-// Sign is a placeholder — full EIP-1559 signing is implemented in Issue 3.4.
-func (s *LedgerSigner) Sign(_ context.Context, _ internaltx.UnsignedTx) (*SignedTx, error) {
+// isUserRejectedErr returns true when err indicates the user rejected signing on the device.
+// Heuristic: checks for "rejected", "denied", "cancel", or APDU code "6985".
+// TODO(3.6): refine after real hardware testing confirms exact error strings.
+func isUserRejectedErr(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "rejected") ||
+		strings.Contains(msg, "denied") ||
+		strings.Contains(msg, "cancel") ||
+		strings.Contains(msg, "6985")
+}
+
+// isChainIDMismatchErr returns true when err indicates the Ledger refused the chain ID.
+// Heuristic: checks for "chain" combined with "unknown", "mismatch", "6a80", or "6a81".
+// TODO(3.6): refine after real hardware testing confirms exact error strings.
+func isChainIDMismatchErr(err error) bool {
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "chain") {
+		return false
+	}
+	return strings.Contains(msg, "unknown") ||
+		strings.Contains(msg, "mismatch") ||
+		strings.Contains(msg, "6a80") ||
+		strings.Contains(msg, "6a81")
+}
+
+// Sign produces a signed EIP-1559 transaction by sending the transaction to the
+// Ledger device for user confirmation.
+//
+// Blocks on user confirmation on the device. Honors ctx for cancellation, but the
+// device-side signing operation may still complete after ctx cancellation — the
+// goroutine will drop the result. This is a known trade-off: Ledger APDU exchanges
+// cannot be interrupted mid-flight; the goroutine leaks only until the user
+// presses a button (or the device times out).
+func (s *LedgerSigner) Sign(ctx context.Context, unsigned internaltx.UnsignedTx) (*SignedTx, error) {
 	if s.closed.Load() {
 		return nil, ErrSignerClosed
 	}
-	return nil, fmt.Errorf("ledger signing not yet implemented; wired in Issue 3.4")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if unsigned.ChainID == 0 {
+		return nil, fmt.Errorf("ChainID must be non-zero: %w", ErrInvalidChainID)
+	}
+	chainID := new(big.Int).SetUint64(unsigned.ChainID)
+
+	value, ok := new(big.Int).SetString(strings.TrimPrefix(unsigned.Value, "0x"), 16)
+	if !ok {
+		return nil, fmt.Errorf("invalid Value hex %q", unsigned.Value)
+	}
+
+	maxFeeHex := strings.TrimPrefix(unsigned.MaxFeePerGas, "0x")
+	if maxFeeHex == "" {
+		return nil, fmt.Errorf("MaxFeePerGas is required for EIP-1559 transactions")
+	}
+	maxFee, ok := new(big.Int).SetString(maxFeeHex, 16)
+	if !ok {
+		return nil, fmt.Errorf("invalid MaxFeePerGas hex %q", unsigned.MaxFeePerGas)
+	}
+
+	maxPrioHex := strings.TrimPrefix(unsigned.MaxPriorityFeePerGas, "0x")
+	if maxPrioHex == "" {
+		return nil, fmt.Errorf("MaxPriorityFeePerGas is required for EIP-1559 transactions")
+	}
+	maxPrio, ok := new(big.Int).SetString(maxPrioHex, 16)
+	if !ok {
+		return nil, fmt.Errorf("invalid MaxPriorityFeePerGas hex %q", unsigned.MaxPriorityFeePerGas)
+	}
+
+	dataHex := strings.TrimPrefix(unsigned.Data, "0x")
+	var data []byte
+	if dataHex != "" {
+		var err error
+		data, err = hex.DecodeString(dataHex)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Data hex: %w", err)
+		}
+	}
+
+	to := common.HexToAddress(unsigned.To)
+	dynTx := &types.DynamicFeeTx{
+		ChainID:   chainID,
+		Nonce:     unsigned.Nonce,
+		GasTipCap: maxPrio,
+		GasFeeCap: maxFee,
+		Gas:       unsigned.Gas,
+		To:        &to,
+		Value:     value,
+		Data:      data,
+	}
+	unsignedTx := types.NewTx(dynTx)
+
+	fmt.Fprintf(s.confirmationPrompt, "Please confirm the transaction on your Ledger device...\n")
+
+	type signResult struct {
+		signed *types.Transaction
+		err    error
+	}
+	ch := make(chan signResult, 1)
+	go func() {
+		signed, err := s.wallet.SignTx(s.account, unsignedTx, chainID)
+		ch <- signResult{signed, err}
+	}()
+
+	var r signResult
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case r = <-ch:
+	}
+
+	if r.err != nil {
+		// Check chain-ID mismatch before user-rejected: "6a80 chain rejected"
+		// contains "rejected" but is a chain-ID error, not a user decision.
+		if isChainIDMismatchErr(r.err) {
+			return nil, fmt.Errorf("ledger rejected chain ID %d: %w", unsigned.ChainID, ErrChainIDMismatch)
+		}
+		if isUserRejectedErr(r.err) {
+			return nil, fmt.Errorf("user rejected signing on ledger: %w", ErrUserRejected)
+		}
+		return nil, fmt.Errorf("ledger SignTx: %w", r.err)
+	}
+
+	signedTx := r.signed
+	ethSigner := types.LatestSignerForChainID(chainID)
+
+	v, rVal, sVal := signedTx.RawSignatureValues()
+
+	from, err := types.Sender(ethSigner, signedTx)
+	if err != nil {
+		return nil, fmt.Errorf("sender recovery failed: %w", err)
+	}
+
+	// MarshalBinary produces the EIP-2718 envelope: 0x02 || rlp(...)
+	raw, err := signedTx.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("MarshalBinary: %w", err)
+	}
+
+	return &SignedTx{
+		Unsigned: unsigned,
+		From:     from.Hex(),
+		Hash:     signedTx.Hash().Hex(),
+		R:        "0x" + rVal.Text(16),
+		S:        "0x" + sVal.Text(16),
+		V:        v.Text(10), // decimal "0" or "1" for EIP-1559 y-parity
+		RawRLP:   "0x" + hex.EncodeToString(raw),
+	}, nil
 }
 
 func (s *LedgerSigner) Name() string                  { return ledgerSignerName }
