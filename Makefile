@@ -1,4 +1,4 @@
-.PHONY: all build build-go build-rust build-python lint test fmt clean
+.PHONY: all build build-go build-rust build-python lint test fmt clean snapshot
 
 all: build
 
@@ -23,7 +23,7 @@ lint:
 
 # Test
 test:
-	cd go && go test ./...
+	cd go && CGO_ENABLED=1 go test ./...
 	cd rust && cargo test --workspace
 	cd python && pytest
 
@@ -32,6 +32,14 @@ fmt:
 	cd go && gofmt -w .
 	cd rust && cargo fmt
 	cd python && ruff format .
+
+## snapshot: build a local snapshot for all four targets using zig cc for Linux cross-compilation
+## Requires: goreleaser (go install github.com/goreleaser/goreleaser/v2@latest)
+##           zig (brew install zig) for Linux cross-compilation on macOS
+snapshot:
+	CC_FOR_LINUX_AMD64="zig cc -target x86_64-linux-musl" \
+	CC_FOR_LINUX_ARM64="zig cc -target aarch64-linux-musl" \
+	goreleaser release --snapshot --clean
 
 # Clean
 clean:
