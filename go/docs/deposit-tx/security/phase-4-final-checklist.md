@@ -136,20 +136,25 @@ go/cmd/eth-deposit-tx/docs/SECURITY.md threat model and recommendation
 
 ---
 
-## 7. Mainnet gated behind safety flag
+## 7. Mainnet broadcast safety: chain-ID mismatch refusal + network-name confirmation
 
 **Status: IMPLEMENTED**
 
-Attempting to use `--network mainnet` without `--i-understand-this-is-mainnet` produces exit code 2 and prints an uppercase `MAINNET` banner. The gate is enforced in `config.go` at flag validation time, before any RPC or signing occurs.
+Note: eth-deposit-tx does NOT have a `--i-understand-this-is-mainnet` flag (that is an eth-deposit-gen feature). The mainnet safety mechanism in eth-deposit-tx operates at the broadcast (`send`) layer:
+
+1. **Chain-ID cross-check** (`send.go:180-183`): `send` fetches the chain ID from the RPC node via `eth_chainId` and compares it against the chain ID embedded in the signed transaction. If they differ, broadcast is refused immediately with exit code 5 (`ErrBroadcastChainIDMismatch`). This prevents accidental broadcast to the wrong network (e.g., signing for mainnet but sending to a testnet RPC, or vice versa).
+
+2. **Network-name confirmation** (`send.go:212`): before calling `eth_sendRawTransaction`, the user must type the exact network name (e.g., `mainnet`) on stdin. Case-insensitive comparison. Bypassed only by `--yes` (non-interactive automation). This is covered in detail under item 8.
 
 **Evidence:**
 ```
-go/cmd/eth-deposit-tx/config.go        mainnet gate validation
+go/cmd/eth-deposit-tx/send.go:180-183   chain-ID fetch + mismatch refusal
+go/cmd/eth-deposit-tx/send.go:212       network-name confirmation prompt
 ```
 
 **Verification grep:**
 ```sh
-grep -n 'i-understand-this-is-mainnet\|MAINNET' go/cmd/eth-deposit-tx/config.go
+grep -n 'confirm\|LookupByChainID\|mismatch\|ErrBroadcastChainIDMismatch' go/cmd/eth-deposit-tx/send.go
 ```
 
 ---
@@ -258,7 +263,7 @@ When `--rpc-url` is not provided, `build` uses only the supplied flags (nonce, g
 | 4 | Signed output file 0o600 | IMPLEMENTED |
 | 5 | Sentinel-based typed exit codes | IMPLEMENTED |
 | 6 | Ledger promoted as primary | IMPLEMENTED |
-| 7 | Mainnet safety gate | IMPLEMENTED |
+| 7 | Mainnet broadcast safety (chain-ID check + confirmation) | IMPLEMENTED |
 | 8 | Double-confirmation broadcast | IMPLEMENTED |
 | 9 | CGO documented; Windows excluded | IMPLEMENTED / OUT-OF-SCOPE |
 | 10 | GOFLAGS=-mod=readonly in CI | IMPLEMENTED |

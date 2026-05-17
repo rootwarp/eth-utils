@@ -18,7 +18,7 @@ against real hardware are not yet refined — that refinement is tracked for v0.
 - **Subcommands:** `build`, `sign`, `run`, `send` wired via `urfave/cli/v2`. `run` is a convenience alias for `build + sign` on the same machine. `send` broadcasts a signed transaction via JSON-RPC.
 - **Local signer:** `--signer local` reads the private key from `ETH_DEPOSIT_TX_PRIVATE_KEY` (env-var only; never a CLI flag), signs an EIP-1559 transaction, and zeroizes the key on close.
 - **Ledger signer:** `--signer ledger` signs via a connected Ledger hardware wallet using the go-ethereum `usbwallet` transport. Key never leaves the device.
-- **Networks:** Holesky, Sepolia, Hoodi, and Mainnet. Mainnet requires `--i-understand-this-is-mainnet` and a printed `MAINNET` banner before any signing.
+- **Networks:** Holesky, Sepolia, Hoodi, and Mainnet. Mainnet safety: `send` fetches the chain ID from the RPC node and refuses broadcast if it mismatches the signed tx's chain ID, preventing accidental cross-network broadcast. Users must type the network name interactively before `eth_sendRawTransaction` is called.
 - **Static fee/gas/nonce:** all gas and nonce flags can be supplied manually for fully offline / air-gapped operation (`build` with no `--rpc-url`).
 - **RPC fee/gas/nonce resolution:** when `--rpc-url` is provided, `build` fetches the current nonce, base fee, and suggests EIP-1559 tip cap from the node.
 - **Double-confirmation broadcast:** `send` requires the user to type the network name to confirm before `eth_sendRawTransaction` is called, even in non-interactive mode.
