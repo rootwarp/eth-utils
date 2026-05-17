@@ -7,17 +7,17 @@
 # (bls/lib/{darwin,linux}/{amd64,arm64}/libbls384_256.a). CGO_ENABLED=1 is
 # therefore required; the binary cannot be built with pure Go.
 #
-# CI release builds (#21) use a native-runner matrix: macos-latest builds
-# darwin targets and ubuntu-latest builds linux targets, each with the host
-# C compiler. Because herumi's .a archives are pre-compiled per OS/arch, the
-# C compiler only needs to link — no C source compilation. This avoids zig
-# version pinning and any musl-vs-glibc tradeoffs in CI.
+# CI release builds (#21): test jobs run natively per OS/arch (ubuntu-latest,
+# ubuntu-24.04-arm, macos-14); the release build runs in a single
+# ghcr.io/goreleaser/goreleaser-cross:v1.25.9 container on ubuntu-latest,
+# which bundles osxcross and GNU cross-compilers for all 4 targets.
 #
 # For local snapshot builds: run `make snapshot` (repo root Makefile). It
 # sets CC_FOR_LINUX_AMD64 and CC_FOR_LINUX_ARM64 env vars before invoking
 # goreleaser. The linux build configs read those via ${CC_FOR_LINUX_*:-cc}
 # so goreleaser uses zig cc locally but falls back to "cc" (host compiler)
-# in CI where those vars are unset.
+# in CI where those vars are unset. Darwin targets always fall back to "cc"
+# (Xcode clang) locally; the CI container sets CC_FOR_DARWIN_* to osxcross.
 #
 # Windows: excluded. herumi/bls-eth-go-binary ships a windows/amd64 .a but
 # there is no Windows CI runner configured and the operator use case is

@@ -76,8 +76,8 @@ Darwin targets are always built natively by the host macOS compiler.
 
 | OS      | Arch  | Strategy (local snapshot) | Strategy (CI release) |
 |---------|-------|---------------------------|-----------------------|
-| darwin  | amd64 | host `cc`                 | `macos-latest` runner |
-| darwin  | arm64 | host `cc`                 | `macos-latest` runner |
+| darwin  | amd64 | host `cc`                 | `goreleaser-cross` container |
+| darwin  | arm64 | host `cc`                 | `goreleaser-cross` container |
 | linux   | amd64 | `zig cc x86_64-linux-musl`| `ubuntu-latest` runner|
 | linux   | arm64 | `zig cc aarch64-linux-musl`| `ubuntu-latest` runner|
 
@@ -292,18 +292,18 @@ publishing a real release. Perform this before tagging v1.0.0 (Issue #24).
    gh run watch   # select the run for v0.0.0-rc1
    ```
 
-4. **Verify the draft release on GitHub:**
+4. **Verify the pre-release on GitHub:**
    - Navigate to: `https://github.com/rootwarp/eth-utils/releases`
-   - A draft release tagged `v0.0.0-rc1` should appear with all expected assets:
+   - A pre-release tagged `v0.0.0-rc1` should appear with all expected assets:
      - `eth-deposit-gen_darwin_amd64.tar.gz`
      - `eth-deposit-gen_darwin_arm64.tar.gz`
      - `eth-deposit-gen_linux_amd64.tar.gz`
      - `eth-deposit-gen_linux_arm64.tar.gz`
      - `checksums.txt`
-     - `sbom-darwin-amd64.spdx.json`
-     - `sbom-darwin-arm64.spdx.json`
-     - `sbom-linux-amd64.spdx.json`
-     - `sbom-linux-arm64.spdx.json`
+     - `eth-deposit-gen_darwin_amd64.sbom.spdx.json`
+     - `eth-deposit-gen_darwin_arm64.sbom.spdx.json`
+     - `eth-deposit-gen_linux_amd64.sbom.spdx.json`
+     - `eth-deposit-gen_linux_arm64.sbom.spdx.json`
    - `.goreleaser.yaml` sets `release.prerelease: auto`, so `v0.0.0-rc1`
      (pre-release semver) will be marked as a GitHub pre-release, not a draft.
      If you want an explicit draft for the dry-run, temporarily set
@@ -319,8 +319,8 @@ publishing a real release. Perform this before tagging v1.0.0 (Issue #24).
 
 6. **Verify the SBOM:**
    ```bash
-   gh release download v0.0.0-rc1 --pattern 'sbom-linux-amd64.spdx.json'
-   python3 -c "import json; d=json.load(open('sbom-linux-amd64.spdx.json')); print(d['spdxVersion'])"
+   gh release download v0.0.0-rc1 --pattern 'eth-deposit-gen_linux_amd64.sbom.spdx.json'
+   python3 -c "import json; d=json.load(open('eth-deposit-gen_linux_amd64.sbom.spdx.json')); print(d['spdxVersion'])"
    ```
    Expected: `SPDX-2.3` (or similar version string).
 

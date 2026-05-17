@@ -5,13 +5,13 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write
-
 jobs:
   test-linux-amd64:
     name: Test (linux/amd64)
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
 
     defaults:
       run:
@@ -53,6 +53,9 @@ jobs:
     # with ubuntu-latest and add the docker/setup-qemu-action@v3 step plus
     # run tests inside an arm64 QEMU container (see QEMU fallback comment below).
     runs-on: ubuntu-24.04-arm
+
+    permissions:
+      contents: read
 
     defaults:
       run:
@@ -109,6 +112,9 @@ jobs:
     name: Test (darwin/arm64)
     runs-on: macos-14
 
+    permissions:
+      contents: read
+
     defaults:
       run:
         working-directory: go/cmd/eth-deposit-gen
@@ -150,22 +156,23 @@ jobs:
       - test-darwin-arm64
     runs-on: ubuntu-latest
 
-    # goreleaser-cross bundles cross-compilation toolchains for all targets.
-    # Go 1.25 is included in the v1.25.x image series.
-    # Cross-compilers available in the image:
+    permissions:
+      contents: write
+
+    # goreleaser-cross:v1.25.9 bundles Go 1.25 and cross-compilation toolchains:
     #   linux/amd64:  x86_64-linux-gnu-gcc
     #   linux/arm64:  aarch64-linux-gnu-gcc
     #   darwin/amd64: o64-clang   (osxcross)
     #   darwin/arm64: oa64-clang  (osxcross)
-    # These are wired via CC_FOR_* env vars which .goreleaser.yaml reads;
-    # when unset (local macOS snapshot), builds fall back to the host "cc".
+    # The goreleaser binary inside the container is used directly (no
+    # goreleaser-action) to avoid shadowing the pinned version with a floating
+    # "latest" download.
     container:
       image: ghcr.io/goreleaser/goreleaser-cross:v1.25.9
 
     env:
       CGO_ENABLED: "1"
       # Cross-compiler env vars read by .goreleaser.yaml build configs.
-      # These are the toolchain names bundled in goreleaser-cross (osxcross + musl gcc).
       CC_FOR_LINUX_AMD64: x86_64-linux-gnu-gcc
       CC_FOR_LINUX_ARM64: aarch64-linux-gnu-gcc
       CC_FOR_DARWIN_AMD64: o64-clang
@@ -178,45 +185,38 @@ jobs:
           fetch-depth: 0
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: latest
-          args: release --clean
+        run: goreleaser release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate SBOM (linux/amd64)
         uses: anchore/sbom-action@v0
         with:
-          artifact-name: sbom-linux-amd64.spdx.json
-          output-file: sbom-linux-amd64.spdx.json
+          path: dist/eth-deposit-gen_linux_amd64.tar.gz
+          artifact-name: eth-deposit-gen_linux_amd64.sbom.spdx.json
           format: spdx-json
-          upload-artifact: true
           upload-release-assets: true
 
       - name: Generate SBOM (linux/arm64)
         uses: anchore/sbom-action@v0
         with:
-          artifact-name: sbom-linux-arm64.spdx.json
-          output-file: sbom-linux-arm64.spdx.json
+          path: dist/eth-deposit-gen_linux_arm64.tar.gz
+          artifact-name: eth-deposit-gen_linux_arm64.sbom.spdx.json
           format: spdx-json
-          upload-artifact: true
-          upload-release-assets: true
-
-      - name: Generate SBOM (darwin/arm64)
-        uses: anchore/sbom-action@v0
-        with:
-          artifact-name: sbom-darwin-arm64.spdx.json
-          output-file: sbom-darwin-arm64.spdx.json
-          format: spdx-json
-          upload-artifact: true
           upload-release-assets: true
 
       - name: Generate SBOM (darwin/amd64)
         uses: anchore/sbom-action@v0
         with:
-          artifact-name: sbom-darwin-amd64.spdx.json
-          output-file: sbom-darwin-amd64.spdx.json
+          path: dist/eth-deposit-gen_darwin_amd64.tar.gz
+          artifact-name: eth-deposit-gen_darwin_amd64.sbom.spdx.json
           format: spdx-json
-          upload-artifact: true
+          upload-release-assets: true
+
+      - name: Generate SBOM (darwin/arm64)
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist/eth-deposit-gen_darwin_arm64.tar.gz
+          artifact-name: eth-deposit-gen_darwin_arm64.sbom.spdx.json
+          format: spdx-json
           upload-release-assets: true
