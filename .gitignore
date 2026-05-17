@@ -47,3 +47,6 @@ Thumbs.db
 
 # Devnet data (runtime generated)
 scripts/devnet/data/
+
+# Testnet E2E artifacts from e2e-testnet.sh (contain signed txs, not for source control)
+go/testdata/deposit-e2e/
