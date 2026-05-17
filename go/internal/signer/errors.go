@@ -1,0 +1,28 @@
+package signer
+
+import "errors"
+
+var (
+	// ErrUserRejected indicates the user rejected the signing request on a
+	// hardware device. Exit code 3 (signer/crypto error) — but distinct
+	// semantically from a true crypto failure.
+	ErrUserRejected = errors.New("user rejected signing on device")
+
+	// ErrNoDevice indicates no Ledger device was found.
+	ErrNoDevice = errors.New("no Ledger device found")
+
+	// ErrAppNotOpen indicates a Ledger is connected but the Ethereum app
+	// is not open.
+	ErrAppNotOpen = errors.New("ledger Ethereum app is not open")
+
+	// ErrInvalidKey indicates the private key bytes are not a valid
+	// secp256k1 scalar. Generic to keep key material out of error text.
+	ErrInvalidKey = errors.New("invalid private key")
+
+	// ErrChainIDMismatch indicates the signer cannot produce a signature
+	// for the requested chain ID (e.g., Ledger refuses an unknown network).
+	ErrChainIDMismatch = errors.New("chain ID mismatch")
+
+	// ErrSignerClosed indicates Sign was called after Close.
+	ErrSignerClosed = errors.New("signer is closed")
+)
