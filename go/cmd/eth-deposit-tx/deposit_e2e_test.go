@@ -19,10 +19,9 @@ import (
 // phase3KeyPath and phase3UnsignedPath point to the Phase 3 Holesky golden fixtures
 // relative to this package's working directory.
 const (
-	phase3FixtureDir  = "../../testdata/phase3/holesky"
-	phase3KeyFile     = phase3FixtureDir + "/private_key.txt"
-	phase3UnsignedTx  = phase3FixtureDir + "/unsigned_tx.json"
-	phase3SignedGolden = phase3FixtureDir + "/signed_tx_golden.json"
+	phase3FixtureDir = "../../testdata/phase3/holesky"
+	phase3KeyFile    = phase3FixtureDir + "/private_key.txt"
+	phase3UnsignedTx = phase3FixtureDir + "/unsigned_tx.json"
 )
 
 // newE2EApp returns a full app including send, matching the production app minus signal handling.
@@ -62,11 +61,6 @@ func TestE2E_LocalSigner_FullPipeline_NoRPC(t *testing.T) {
 	const envVar = "E2E_TEST_PRIVKEY_PIPELINE"
 	t.Setenv(envVar, key)
 
-	absUnsigned, err := filepath.Abs(phase3UnsignedTx)
-	if err != nil {
-		t.Fatalf("resolve unsigned tx path: %v", err)
-	}
-
 	dir := t.TempDir()
 	outFile := filepath.Join(dir, "signed.json")
 
@@ -75,9 +69,6 @@ func TestE2E_LocalSigner_FullPipeline_NoRPC(t *testing.T) {
 	app.Writer = &out
 	app.ErrWriter = &errOut
 
-	// The run subcommand uses the Phase 3 unsigned tx fixture as deposit data.
-	// The unsigned_tx.json is NOT deposit_data JSON — it's an already-built tx.
-	// We need the actual deposit fixture to exercise run.
 	absDepositFixture, err := filepath.Abs("testdata/deposit-fixture.json")
 	if err != nil {
 		t.Fatalf("resolve deposit fixture path: %v", err)
@@ -115,7 +106,7 @@ func TestE2E_LocalSigner_FullPipeline_NoRPC(t *testing.T) {
 	// Verify EIP-1559 prefix on rawRLP.
 	rawRLP, _ := signed["rawRLP"].(string)
 	if !strings.HasPrefix(rawRLP, "0x02") {
-		t.Errorf("rawRLP must start with 0x02 (EIP-1559 type prefix), got: %q", rawRLP[:min(10, len(rawRLP))])
+		t.Errorf("rawRLP must start with 0x02 (EIP-1559 type prefix), got: %q", rawRLP)
 	}
 
 	// Verify companion .raw file was written.
@@ -125,7 +116,7 @@ func TestE2E_LocalSigner_FullPipeline_NoRPC(t *testing.T) {
 		t.Fatalf("signed.raw not written: %v", err)
 	}
 	if !strings.HasPrefix(strings.TrimSpace(string(rawContent)), "0x02") {
-		t.Errorf("signed.raw must start with 0x02, got: %q", strings.TrimSpace(string(rawContent))[:min(10, len(rawContent))])
+		t.Errorf("signed.raw must start with 0x02, got: %q", strings.TrimSpace(string(rawContent)))
 	}
 
 	// Verify the unsigned nested field has expected Holesky chain ID.
@@ -137,9 +128,6 @@ func TestE2E_LocalSigner_FullPipeline_NoRPC(t *testing.T) {
 	if uint64(chainID) != 17000 {
 		t.Errorf("unsigned.chainId = %v, want 17000 (holesky)", chainID)
 	}
-
-	// Also use the abs path just to confirm the variable is used.
-	_ = absUnsigned
 }
 
 // TestE2E_LocalSigner_BuildSignSendMock exercises the full build → sign → send
@@ -191,7 +179,7 @@ func TestE2E_LocalSigner_BuildSignSendMock(t *testing.T) {
 		SendRawTransactionFn: func(_ context.Context, rawRLP string) (string, error) {
 			// Confirm the RLP we receive starts with the EIP-1559 prefix.
 			if !strings.HasPrefix(rawRLP, "0x02") {
-				t.Errorf("broadcaster received rawRLP without 0x02 prefix: %q", rawRLP[:min(10, len(rawRLP))])
+				t.Errorf("broadcaster received rawRLP without 0x02 prefix: %q", rawRLP)
 			}
 			return mockTxHash, nil
 		},
@@ -292,10 +280,3 @@ func TestE2E_SendMock_ReceiptPolling(t *testing.T) {
 	}
 }
 
-// min returns the smaller of two ints (not in stdlib for Go <1.21 built with older toolchains).
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
