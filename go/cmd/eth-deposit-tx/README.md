@@ -272,6 +272,48 @@ See [`docs/deposit-tx/security/phase-3-signer.md`](../../docs/deposit-tx/securit
 - Known limitations (LocalSigner dev-only, heuristic patterns, goroutine trade-off)
 - Audit grep commands to re-verify key properties
 
+## E2E testing
+
+### Mock E2E (CI-safe, no network access)
+
+Runs the full `run` and `send` subcommands against a mock broadcaster. No RPC endpoint required. This is the path run in CI.
+
+```bash
+# from the go/ module root
+make e2e-mock
+# equivalent to:
+CGO_ENABLED=1 go test -tags=e2e -count=1 ./cmd/eth-deposit-tx/...
+```
+
+Tests covered:
+- `TestE2E_LocalSigner_FullPipeline_NoRPC` — `run` subcommand (build+sign) with Phase 3 fixture key; verifies `SignedTx` fields and `0x02` RLP prefix.
+- `TestE2E_LocalSigner_BuildSignSendMock` — sign the Phase 3 unsigned tx, then send via injected mock broadcaster; verifies tx hash in output.
+- `TestE2E_SendMock_ReceiptPolling` — full send + receipt polling path via mock; verifies receipt file contents.
+
+### Real testnet E2E (manual, requires funded account)
+
+Runs the full pipeline against a live testnet RPC endpoint. **This broadcasts a real transaction and spends testnet ETH.** Use a test account only.
+
+```bash
+# Set required env vars
+export RPC_URL=https://holesky.infura.io/v3/<your-key>
+export ETH_DEPOSIT_TX_PRIVATE_KEY=0x<your-test-key>
+
+# Optional: provide a real deposit_data JSON (default uses the test fixture)
+# export DEPOSIT_DATA_FILE=/path/to/deposit_data.json
+# export NETWORK=holesky  # default
+
+# Run from the go/ module root
+make e2e-testnet
+```
+
+The script saves all artifacts (binary, unsigned tx, signed tx, raw RLP, receipt) to `testdata/deposit-e2e/<timestamp>/`.
+
+After a successful run, fill in the validation report template:
+[`docs/deposit-tx/validation/phase-4-e2e-template.md`](../../docs/deposit-tx/validation/phase-4-e2e-template.md)
+
+For detailed steps, see [`scripts/e2e-testnet.sh`](../../scripts/e2e-testnet.sh).
+
 ## Status and roadmap
 
 - **Phase 1 (done):** CLI scaffold, config resolution, stub `build` command producing unsigned tx JSON.
