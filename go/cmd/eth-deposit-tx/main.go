@@ -74,10 +74,20 @@ func buildCommand() *ucli.Command {
 	return &ucli.Command{
 		Name:  "build",
 		Usage: "Construct an unsigned deposit transaction from deposit data",
-		Description: `Reads a deposit_data JSON file (produced by eth-deposit-gen or the official Launchpad)
-and produces an unsigned Ethereum transaction for the deposit contract.
+		Description: `Reads a deposit_data JSON file (produced by eth-deposit-gen or the Ethereum Launchpad)
+and produces an unsigned EIP-1559 transaction for the Beacon Chain deposit contract.
 
-Supports both hybrid mode (with optional --rpc-url) and fully offline/air-gapped mode.`,
+Supports offline/air-gapped mode (no --rpc-url required) when all gas and nonce
+flags are supplied explicitly, and hybrid mode when --rpc-url is provided.
+
+Example (Holesky testnet, default gas params, output to stdout):
+   eth-deposit-tx build --network holesky --input-file deposit_data.json
+
+Example (write unsigned tx to a file):
+   eth-deposit-tx build --network holesky --input-file deposit_data.json --output unsigned.json
+
+Example (read deposit data from stdin):
+   cat deposit_data.json | eth-deposit-tx build --network holesky --input-file -`,
 		UsageText: `eth-deposit-tx build --input-file FILE --network NET [options]`,
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{
@@ -209,10 +219,12 @@ func signCommand() *ucli.Command {
 	return &ucli.Command{
 		Name:  "sign",
 		Usage: "Sign a previously built unsigned deposit transaction",
-		Description: `Signs an unsigned transaction produced by "eth-deposit-tx build".
+		Description: `NOT YET IMPLEMENTED — coming in Phase 3.
 
+Will sign an unsigned transaction produced by "eth-deposit-tx build".
 Primary signing method is Ledger hardware wallet. A local private-key fallback
-is available via the ETH_DEPOSIT_TX_PRIVATE_KEY environment variable (with strong warnings).`,
+will be available via the ETH_DEPOSIT_TX_PRIVATE_KEY environment variable
+(with strong warnings).`,
 		UsageText: `eth-deposit-tx sign --input FILE [--ledger | --private-key]`,
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{
@@ -231,8 +243,7 @@ is available via the ETH_DEPOSIT_TX_PRIVATE_KEY environment variable (with stron
 			},
 		},
 		Action: func(c *ucli.Context) error {
-			fmt.Fprintf(c.App.Writer, "sign command placeholder (Issue 1.1 scaffold)\n")
-			fmt.Fprintf(c.App.Writer, "Full Ledger + local signer implementation coming in Phase 3.\n")
+			fmt.Fprintf(c.App.Writer, "sign: not yet implemented — coming in Phase 3\n")
 			return nil
 		},
 	}

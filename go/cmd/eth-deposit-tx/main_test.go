@@ -12,6 +12,51 @@ import (
 	ucli "github.com/urfave/cli/v2"
 )
 
+// TestBuild_GoldenOutput compares the exact JSON produced by build (with default
+// gas/nonce params) against testdata/unsigned-tx-golden.json.
+// Set UPDATE_GOLDEN=1 to regenerate the golden file.
+func TestBuild_GoldenOutput(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	fixture := fixtureAbsPath(t)
+
+	app := newTestApp()
+	var out bytes.Buffer
+	app.Writer = &out
+	app.ErrWriter = &out
+
+	err := app.Run([]string{
+		"eth-deposit-tx", "build",
+		"--network", "holesky",
+		"--input-file", fixture,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	goldenPath := filepath.Join("testdata", "unsigned-tx-golden.json")
+
+	if os.Getenv("UPDATE_GOLDEN") != "" {
+		if err := os.WriteFile(goldenPath, out.Bytes(), 0o644); err != nil {
+			t.Fatalf("could not update golden file: %v", err)
+		}
+		t.Logf("golden file updated: %s", goldenPath)
+		return
+	}
+
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("could not read golden file %s: %v (run with UPDATE_GOLDEN=1 to create it)", goldenPath, err)
+	}
+
+	got := out.Bytes()
+	if !bytes.Equal(got, want) {
+		t.Errorf("golden mismatch\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestMain_BuildsCleanly(t *testing.T) {
 	cmd := exec.Command("go", "build", "-o", "/dev/null", ".")
 	output, err := cmd.CombinedOutput()
@@ -277,7 +322,7 @@ func TestSignSubcommand_Action(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	s := out.String()
-	if !strings.Contains(s, "sign command placeholder") {
+	if !strings.Contains(s, "not yet implemented") {
 		t.Errorf("sign action output unexpected: %s", s)
 	}
 }

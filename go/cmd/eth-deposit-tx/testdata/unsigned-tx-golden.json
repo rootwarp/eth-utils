@@ -1,0 +1,11 @@
+{
+  "chainId": 17000,
+  "to": "0x4242424242424242424242424242424242424242",
+  "value": "0x1bc16d674ec800000",
+  "data": "0x22895118aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "gas": 250000,
+  "maxFeePerGas": "0x4a817c800",
+  "maxPriorityFeePerGas": "0x3b9aca00",
+  "nonce": 0,
+  "type": "0x2"
+}
