@@ -2,7 +2,14 @@
 
 Build, sign, and broadcast Ethereum Beacon Chain deposit transactions from Launchpad-compatible `deposit_data` JSON.
 
-**Phase 4.2 status:** `send` subcommand is now available for broadcasting signed transactions via JSON-RPC. All four subcommands (`build`, `sign`, `run`, `send`) work end-to-end.
+## Documentation
+
+- [USAGE.md](docs/USAGE.md) — complete command reference (all flags, examples, workflows)
+- [SECURITY.md](docs/SECURITY.md) — threat model, key handling, Ledger guidance
+- [INSTALL.md](docs/INSTALL.md) — build and install instructions
+- [EXAMPLES.md](docs/EXAMPLES.md) — copy-pasteable end-to-end recipes
+- [Phase 3 security review](../../docs/deposit-tx/security/phase-3-signer.md)
+- [Phase 4 E2E validation template](../../docs/deposit-tx/validation/phase-4-e2e-template.md)
 
 ## Overview
 
