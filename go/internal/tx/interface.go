@@ -14,8 +14,8 @@ type TxBuilder interface {
 }
 
 // BuildConfig carries the parameters needed to build an unsigned transaction.
-// Nonce is a pointer so callers can distinguish "not set" from "set to 0";
-// nil means the implementation should resolve a nonce (e.g., via RPC in Issue 2.4).
+// Nonce is a pointer so callers can distinguish "not set" from "set to 0".
+// nil defaults to 0 in the current implementation; Issue 2.4 will resolve via RPC.
 type BuildConfig struct {
 	NetworkParams        network.Params
 	RPCURL               string

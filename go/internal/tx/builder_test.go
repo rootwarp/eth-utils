@@ -2,6 +2,7 @@ package tx
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"math/big"
 	"strings"
@@ -145,6 +146,133 @@ func TestBuilder_BuildUnsigned_NilMaxPriorityFeePerGas(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNilFeeField) {
 		t.Errorf("expected ErrNilFeeField, got: %v", err)
+	}
+}
+
+func TestBuilder_BuildUnsigned_CancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	entry := makeHoleskyEntry()
+	params := holeskyParams(t)
+	cfg := BuildConfig{
+		NetworkParams:        params,
+		GasLimit:             250_000,
+		MaxFeePerGas:         big.NewInt(1),
+		MaxPriorityFeePerGas: big.NewInt(1),
+	}
+	b := NewBuilder()
+	_, err := b.BuildUnsigned(ctx, entry, cfg)
+	if err == nil {
+		t.Fatal("expected error for cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v", err)
+	}
+}
+
+func TestBuilder_BuildUnsigned_WrongAmount(t *testing.T) {
+	ctx := context.Background()
+	entry := makeHoleskyEntry()
+	entry.Amount = 1_000_000_000 // 1 ETH in Gwei, not 32
+	params := holeskyParams(t)
+	cfg := BuildConfig{
+		NetworkParams:        params,
+		GasLimit:             250_000,
+		MaxFeePerGas:         big.NewInt(1),
+		MaxPriorityFeePerGas: big.NewInt(1),
+	}
+	b := NewBuilder()
+	_, err := b.BuildUnsigned(ctx, entry, cfg)
+	if err == nil {
+		t.Fatal("expected error for wrong amount, got nil")
+	}
+	if !errors.Is(err, ErrInvalidAmount) {
+		t.Errorf("expected ErrInvalidAmount, got: %v", err)
+	}
+}
+
+func TestBuilder_BuildUnsigned_DataLength(t *testing.T) {
+	ctx := context.Background()
+	entry := makeHoleskyEntry()
+	params := holeskyParams(t)
+	nonce := uint64(0)
+	cfg := BuildConfig{
+		NetworkParams:        params,
+		GasLimit:             250_000,
+		MaxFeePerGas:         big.NewInt(1),
+		MaxPriorityFeePerGas: big.NewInt(1),
+		Nonce:                &nonce,
+	}
+	b := NewBuilder()
+	tx, err := b.BuildUnsigned(ctx, entry, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// "0x" + 420 bytes * 2 hex chars = 2 + 840 = 842 chars
+	if len(tx.Data) != 842 {
+		t.Errorf("Data length: got %d, want 842", len(tx.Data))
+	}
+}
+
+func TestBuilder_BuildUnsigned_RoundTrip(t *testing.T) {
+	ctx := context.Background()
+	entry := makeHoleskyEntry()
+	params := holeskyParams(t)
+	nonce := uint64(0)
+	cfg := BuildConfig{
+		NetworkParams:        params,
+		GasLimit:             250_000,
+		MaxFeePerGas:         big.NewInt(1),
+		MaxPriorityFeePerGas: big.NewInt(1),
+		Nonce:                &nonce,
+	}
+	b := NewBuilder()
+	tx, err := b.BuildUnsigned(ctx, entry, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Decode calldata from hex.
+	hexData := strings.TrimPrefix(tx.Data, "0x")
+	raw, err := hex.DecodeString(hexData)
+	if err != nil {
+		t.Fatalf("failed to decode Data hex: %v", err)
+	}
+	if len(raw) != 420 {
+		t.Fatalf("raw calldata length: got %d, want 420", len(raw))
+	}
+
+	// Verify deposit_data_root in head slot 3 (bytes 4+96..4+128).
+	gotRoot := raw[4+96 : 4+128]
+	for i, b := range entry.DepositDataRoot {
+		if gotRoot[i] != b {
+			t.Errorf("DepositDataRoot[%d]: got %02x, want %02x", i, gotRoot[i], b)
+		}
+	}
+
+	// Verify pubkey in tail (offset 128 from args start = raw[4+128..]).
+	tail := raw[4:]
+	pubkeyData := tail[128+32 : 128+32+48]
+	for i, b := range entry.Pubkey {
+		if pubkeyData[i] != b {
+			t.Errorf("Pubkey[%d]: got %02x, want %02x", i, pubkeyData[i], b)
+		}
+	}
+
+	// Verify withdrawal_credentials in tail (offset 224).
+	wcData := tail[224+32 : 224+32+32]
+	for i, b := range entry.WithdrawalCredentials {
+		if wcData[i] != b {
+			t.Errorf("WithdrawalCredentials[%d]: got %02x, want %02x", i, wcData[i], b)
+		}
+	}
+
+	// Verify signature in tail (offset 288).
+	sigData := tail[288+32 : 288+32+96]
+	for i, b := range entry.Signature {
+		if sigData[i] != b {
+			t.Errorf("Signature[%d]: got %02x, want %02x", i, sigData[i], b)
+		}
 	}
 }
 
