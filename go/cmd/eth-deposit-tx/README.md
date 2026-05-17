@@ -225,7 +225,7 @@ Flag values take precedence over environment variables.
 | 0 | Success |
 | 1 | Unexpected / internal error |
 | 2 | User / configuration error (bad input, unknown network, missing file, invalid `--signer`) |
-| 3 | Signer / crypto error (bad private key, no Ledger device, Ethereum app not open, chain ID mismatch) |
+| 3 | Signer / crypto error (bad private key, no Ledger device, Ethereum app not open) |
 | 4 | User abort (SIGINT / Ctrl-C, Ledger device rejection, or declined `send` confirmation) |
 | 5 | Broadcast / RPC error (dial failure, `eth_sendRawTransaction` rejection, chain ID mismatch between signed tx and RPC node) |
 

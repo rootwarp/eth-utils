@@ -227,8 +227,8 @@ unset ETH_DEPOSIT_TX_PRIVATE_KEY
 If you have the raw RLP hex (the content of `signed.raw`) and want to broadcast it directly without using this tool, you can use `cast` (from Foundry) or `curl`:
 
 ```bash
-# Using cast:
-cast send --rpc-url https://holesky.infura.io/v3/<key> --async "$(cat signed.raw)"
+# Using cast (cast publish broadcasts a pre-signed raw transaction):
+cast publish --rpc-url https://holesky.infura.io/v3/<key> "$(cat signed.raw)"
 
 # Using curl (eth_sendRawTransaction):
 curl -s -X POST https://holesky.infura.io/v3/<key> \

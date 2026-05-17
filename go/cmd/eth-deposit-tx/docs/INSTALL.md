@@ -2,8 +2,12 @@
 
 ## Requirements
 
-- **Go 1.21+** with CGO enabled (required for the Ledger USB HID library)
-- **C toolchain** (gcc or clang) in PATH — needed to compile the Ledger USB bindings
+- **Go 1.26.0 or later** with CGO enabled
+- **C toolchain** (gcc or clang) in PATH
+
+CGO is required for two reasons:
+1. **BLS library** (`herumi/bls-eth-go-binary`) — pulled in transitively via `internal/deposit`; always needed regardless of signing method.
+2. **Ledger USB/HID bindings** — needed only when signing with `--signer ledger`; macOS provides the HID layer via IOKit, Linux requires `libusb` and `libudev`.
 
 On macOS, CGO is enabled by default and the C toolchain ships with Xcode Command Line Tools. On Linux, install `gcc` and the USB/udev development headers.
 
