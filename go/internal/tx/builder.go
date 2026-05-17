@@ -33,8 +33,6 @@ func NewBuilder() *Builder {
 
 // BuildUnsigned constructs an unsigned EIP-1559 deposit transaction with
 // real ABI-encoded calldata for the deposit() function.
-// It validates the entry amount, ABI-encodes the deposit parameters, and
-// sets the value to exactly 32 ETH regardless of the entry amount.
 func (b *Builder) BuildUnsigned(ctx context.Context, entry deposit.Entry, cfg BuildConfig) (*UnsignedTx, error) {
 	if ctx == nil {
 		return nil, ErrNilContext
@@ -43,14 +41,8 @@ func (b *Builder) BuildUnsigned(ctx context.Context, entry deposit.Entry, cfg Bu
 		return nil, err
 	}
 
-	if entry.Amount != 32_000_000_000 {
-		return nil, fmt.Errorf("%w: got %d", ErrInvalidAmount, entry.Amount)
-	}
-	if cfg.MaxFeePerGas == nil {
-		return nil, fmt.Errorf("BuildConfig.MaxFeePerGas: %w", ErrNilFeeField)
-	}
-	if cfg.MaxPriorityFeePerGas == nil {
-		return nil, fmt.Errorf("BuildConfig.MaxPriorityFeePerGas: %w", ErrNilFeeField)
+	if err := Validate(entry, cfg); err != nil {
+		return nil, err
 	}
 
 	nonce := uint64(0)

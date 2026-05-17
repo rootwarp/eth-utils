@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rootwarp/eth-utils/go/internal/deposit"
 	"github.com/rootwarp/eth-utils/go/internal/network"
 )
 
@@ -20,7 +19,7 @@ func TestBuilderSatisfiesTxBuilder(t *testing.T) {
 
 func TestBuilder_BuildUnsigned_Success(t *testing.T) {
 	ctx := context.Background()
-	entry := makeHoleskyEntry()
+	entry := makeValidEntry()
 	params := holeskyParams(t)
 
 	nonce := uint64(3)
@@ -66,7 +65,7 @@ func TestBuilder_BuildUnsigned_Success(t *testing.T) {
 
 func TestBuilder_BuildUnsigned_NilNonce_DefaultsToZero(t *testing.T) {
 	ctx := context.Background()
-	entry := makeHoleskyEntry()
+	entry := makeValidEntry()
 	params := holeskyParams(t)
 	cfg := BuildConfig{
 		NetworkParams:        params,
@@ -193,7 +192,7 @@ func TestBuilder_BuildUnsigned_WrongAmount(t *testing.T) {
 
 func TestBuilder_BuildUnsigned_DataLength(t *testing.T) {
 	ctx := context.Background()
-	entry := makeHoleskyEntry()
+	entry := makeValidEntry()
 	params := holeskyParams(t)
 	nonce := uint64(0)
 	cfg := BuildConfig{
@@ -216,7 +215,7 @@ func TestBuilder_BuildUnsigned_DataLength(t *testing.T) {
 
 func TestBuilder_BuildUnsigned_RoundTrip(t *testing.T) {
 	ctx := context.Background()
-	entry := makeHoleskyEntry()
+	entry := makeValidEntry()
 	params := holeskyParams(t)
 	nonce := uint64(0)
 	cfg := BuildConfig{
@@ -280,14 +279,7 @@ func TestBuilder_BuildUnsigned_ChainIDMatchesNetwork(t *testing.T) {
 	ctx := context.Background()
 	for _, n := range []network.Network{network.Mainnet, network.Holesky, network.Sepolia, network.Hoodi} {
 		params, _ := network.Lookup(n)
-		var e deposit.Entry
-		for i := range e.Pubkey {
-			e.Pubkey[i] = 0x01
-		}
-		for i := range e.Signature {
-			e.Signature[i] = 0x01
-		}
-		e.Amount = 32_000_000_000
+		e := makeValidEntry()
 		e.NetworkName = n
 
 		cfg := BuildConfig{
@@ -304,5 +296,23 @@ func TestBuilder_BuildUnsigned_ChainIDMatchesNetwork(t *testing.T) {
 		if tx.ChainID != params.ChainID {
 			t.Errorf("network %s: ChainID got %d want %d", n, tx.ChainID, params.ChainID)
 		}
+	}
+}
+
+// TestBuilder_BuildUnsigned_ValidationWiredIn asserts that Validate is called by
+// BuildUnsigned: a malformed entry (all-zero pubkey) must return ErrZeroPubkey.
+func TestBuilder_BuildUnsigned_ValidationWiredIn(t *testing.T) {
+	ctx := context.Background()
+	entry := makeValidEntry()
+	entry.Pubkey = [48]byte{} // trigger ErrZeroPubkey
+	cfg := makeValidConfig(t)
+
+	b := NewBuilder()
+	_, err := b.BuildUnsigned(ctx, entry, cfg)
+	if err == nil {
+		t.Fatal("expected validation error for all-zero pubkey, got nil")
+	}
+	if !errors.Is(err, ErrZeroPubkey) {
+		t.Errorf("expected ErrZeroPubkey, got: %v", err)
 	}
 }
