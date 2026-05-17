@@ -19,17 +19,42 @@ needs to link — no C source compilation is required.
 
 ### CI release builds (#21)
 
-The release workflow uses a native-runner matrix:
-- `macos-latest` runner builds `darwin/amd64` and `darwin/arm64`
-- `ubuntu-latest` runner builds `linux/amd64` and `linux/arm64`
+The release workflow uses a two-tier strategy:
 
-Each runner uses the host `cc`. Static archives from `herumi/bls-eth-go-binary`
-are fetched automatically via `go mod download`. This avoids any zig version
-pinning and any musl-vs-glibc tradeoffs in CI.
+**Test jobs — native runner matrix (3 jobs run in parallel):**
+- `linux/amd64` — `ubuntu-latest` runner, host gcc, `CGO_ENABLED=1`
+- `linux/arm64` — `ubuntu-24.04-arm` runner (native ARM, free for public repos
+  since GitHub's 2025 rollout), host gcc, `CGO_ENABLED=1`
+- `darwin/arm64` — `macos-14` runner (Apple M-series), Xcode clang, `CGO_ENABLED=1`
 
-The `.goreleaser.yaml` linux build configs read the `CC_FOR_LINUX_AMD64` and
-`CC_FOR_LINUX_ARM64` env vars (defaulting to `cc` when unset), so CI with no
-special vars automatically uses the native host compiler.
+**linux/arm64 runner choice rationale:** `ubuntu-24.04-arm` is a GitHub-hosted
+native ARM64 runner available on public repositories at no charge (announced
+Feb 2025). It avoids QEMU overhead and gives a real ARM kernel for tests.
+Fallback (if plan/billing changes): replace `ubuntu-24.04-arm` with
+`ubuntu-latest` and add `docker/setup-qemu-action@v3` + run tests inside an
+`arm64` QEMU container. The fallback is documented as commented-out YAML in
+`.github/workflows/release.yml`.
+
+**Release build job — goreleaser-cross container on ubuntu-latest:**
+The goreleaser job runs in the `ghcr.io/goreleaser/goreleaser-cross:v1.25.9`
+Docker container (Go 1.25, goreleaser v2, full cross-toolchain). This single
+container image bundles osxcross (darwin) and GNU cross-compilers (linux/arm64),
+enabling all 4 target archives from one `ubuntu-latest` runner:
+- `darwin/amd64` → `o64-clang` (osxcross)
+- `darwin/arm64` → `oa64-clang` (osxcross)
+- `linux/amd64`  → `x86_64-linux-gnu-gcc`
+- `linux/arm64`  → `aarch64-linux-gnu-gcc`
+
+The `.goreleaser.yaml` build configs read `CC_FOR_DARWIN_AMD64`,
+`CC_FOR_DARWIN_ARM64`, `CC_FOR_LINUX_AMD64`, and `CC_FOR_LINUX_ARM64` env vars,
+defaulting to `cc` when unset. CI sets all four; local `make snapshot` sets
+only the linux vars (using zig cc) and leaves darwin to the host Xcode clang.
+
+The native-runner matrix in the strategy doc refers to **test jobs only**. The
+actual release build (goreleaser) runs on a single runner with cross-compile
+toolchains, not per-OS native runners. This distinction is intentional: tests
+validate behaviour on real OS/arch, while goreleaser-cross builds all archives
+from one reproducible container.
 
 ### Local snapshot builds
 
@@ -231,3 +256,93 @@ tar -xzf eth-deposit-gen_darwin_arm64.tar.gz
 ```
 
 Verify the output JSON matches the expected deposit data field-for-field.
+
+---
+
+## Release CI dry-run
+
+This runbook describes how to exercise the release workflow end-to-end without
+publishing a real release. Perform this before tagging v1.0.0 (Issue #24).
+
+### Prerequisites
+
+- You have push access to the repository (or a fork where Actions runs).
+- The branch under test has `.github/workflows/release.yml` present.
+- `GITHUB_TOKEN` is the only secret required — it is injected automatically by
+  GitHub Actions; no additional secrets need to be configured.
+
+### Steps
+
+1. **Ensure the branch is pushed to the remote:**
+   ```bash
+   git push origin feat/issue-21-release-ci
+   ```
+
+2. **Create and push the test tag from that branch:**
+   ```bash
+   git tag v0.0.0-rc1
+   git push origin v0.0.0-rc1
+   ```
+   The `release.yml` workflow triggers on `push` of tags matching `v*`.
+   This tag matches and will start the pipeline.
+
+3. **Monitor the workflow run:**
+   ```bash
+   gh run list --workflow=release.yml --limit=5
+   gh run watch   # select the run for v0.0.0-rc1
+   ```
+
+4. **Verify the draft release on GitHub:**
+   - Navigate to: `https://github.com/rootwarp/eth-utils/releases`
+   - A draft release tagged `v0.0.0-rc1` should appear with all expected assets:
+     - `eth-deposit-gen_darwin_amd64.tar.gz`
+     - `eth-deposit-gen_darwin_arm64.tar.gz`
+     - `eth-deposit-gen_linux_amd64.tar.gz`
+     - `eth-deposit-gen_linux_arm64.tar.gz`
+     - `checksums.txt`
+     - `sbom-darwin-amd64.spdx.json`
+     - `sbom-darwin-arm64.spdx.json`
+     - `sbom-linux-amd64.spdx.json`
+     - `sbom-linux-arm64.spdx.json`
+   - `.goreleaser.yaml` sets `release.prerelease: auto`, so `v0.0.0-rc1`
+     (pre-release semver) will be marked as a GitHub pre-release, not a draft.
+     If you want an explicit draft for the dry-run, temporarily set
+     `release.draft: true` in `.goreleaser.yaml` before pushing the tag.
+
+5. **Download and smoke-test one binary:**
+   ```bash
+   gh release download v0.0.0-rc1 --pattern 'eth-deposit-gen_linux_amd64.tar.gz'
+   tar -xzf eth-deposit-gen_linux_amd64.tar.gz
+   ./eth-deposit-gen --version
+   ./eth-deposit-gen --help
+   ```
+
+6. **Verify the SBOM:**
+   ```bash
+   gh release download v0.0.0-rc1 --pattern 'sbom-linux-amd64.spdx.json'
+   python3 -c "import json; d=json.load(open('sbom-linux-amd64.spdx.json')); print(d['spdxVersion'])"
+   ```
+   Expected: `SPDX-2.3` (or similar version string).
+
+7. **Verify checksums:**
+   ```bash
+   gh release download v0.0.0-rc1 --pattern 'checksums.txt'
+   sha256sum -c checksums.txt 2>/dev/null || shasum -a 256 -c checksums.txt
+   ```
+
+8. **Clean up the test tag and release after verification:**
+   ```bash
+   gh release delete v0.0.0-rc1 --yes
+   git push origin :v0.0.0-rc1   # delete the remote tag
+   git tag -d v0.0.0-rc1         # delete the local tag
+   ```
+
+### What constitutes a passing dry-run
+
+- All three pre-release test jobs (linux/amd64, linux/arm64, darwin/arm64)
+  complete green.
+- The goreleaser job completes and uploads all 4 archives + checksums.txt.
+- The SBOM steps attach at least one `.spdx.json` per platform.
+- No long-lived PAT or external secret is referenced in any workflow log.
+- Record the run URL and asset list in this doc under "Dry-run evidence" before
+  proceeding to Issue #24.

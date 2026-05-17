@@ -1,0 +1,222 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test-linux-amd64:
+    name: Test (linux/amd64)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: go/cmd/eth-deposit-gen
+
+    env:
+      CGO_ENABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify module checksums
+        run: go mod verify
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        run: staticcheck ./...
+
+      - name: Test
+        run: go test ./...
+
+  test-linux-arm64:
+    name: Test (linux/arm64)
+    # ubuntu-24.04-arm is a GitHub-hosted native ARM runner available for
+    # public repositories. If this runner is unavailable on your plan, replace
+    # with ubuntu-latest and add the docker/setup-qemu-action@v3 step plus
+    # run tests inside an arm64 QEMU container (see QEMU fallback comment below).
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: go/cmd/eth-deposit-gen
+
+    env:
+      CGO_ENABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify module checksums
+        run: go mod verify
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        run: staticcheck ./...
+
+      - name: Test
+        run: go test ./...
+
+    # QEMU fallback: if ubuntu-24.04-arm is unavailable, replace the job above
+    # with this pattern on ubuntu-latest:
+    #
+    # - name: Set up QEMU
+    #   uses: docker/setup-qemu-action@v3
+    #   with:
+    #     platforms: arm64
+    #
+    # - name: Test (arm64 via QEMU)
+    #   uses: addnab/docker-run-action@v3
+    #   with:
+    #     image: golang:1.25
+    #     options: --platform linux/arm64 -v ${{ github.workspace }}:/workspace -w /workspace/go/cmd/eth-deposit-gen -e CGO_ENABLED=1
+    #     run: |
+    #       go mod verify
+    #       go vet ./...
+    #       go test ./...
+
+  test-darwin-arm64:
+    name: Test (darwin/arm64)
+    runs-on: macos-14
+
+    defaults:
+      run:
+        working-directory: go/cmd/eth-deposit-gen
+
+    env:
+      CGO_ENABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify module checksums
+        run: go mod verify
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        run: staticcheck ./...
+
+      - name: Test
+        run: go test ./...
+
+  goreleaser:
+    name: GoReleaser
+    needs:
+      - test-linux-amd64
+      - test-linux-arm64
+      - test-darwin-arm64
+    runs-on: ubuntu-latest
+
+    # goreleaser-cross bundles cross-compilation toolchains for all targets.
+    # Go 1.25 is included in the v1.25.x image series.
+    # Cross-compilers available in the image:
+    #   linux/amd64:  x86_64-linux-gnu-gcc
+    #   linux/arm64:  aarch64-linux-gnu-gcc
+    #   darwin/amd64: o64-clang   (osxcross)
+    #   darwin/arm64: oa64-clang  (osxcross)
+    # These are wired via CC_FOR_* env vars which .goreleaser.yaml reads;
+    # when unset (local macOS snapshot), builds fall back to the host "cc".
+    container:
+      image: ghcr.io/goreleaser/goreleaser-cross:v1.25.9
+
+    env:
+      CGO_ENABLED: "1"
+      # Cross-compiler env vars read by .goreleaser.yaml build configs.
+      # These are the toolchain names bundled in goreleaser-cross (osxcross + musl gcc).
+      CC_FOR_LINUX_AMD64: x86_64-linux-gnu-gcc
+      CC_FOR_LINUX_ARM64: aarch64-linux-gnu-gcc
+      CC_FOR_DARWIN_AMD64: o64-clang
+      CC_FOR_DARWIN_ARM64: oa64-clang
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate SBOM (linux/amd64)
+        uses: anchore/sbom-action@v0
+        with:
+          artifact-name: sbom-linux-amd64.spdx.json
+          output-file: sbom-linux-amd64.spdx.json
+          format: spdx-json
+          upload-artifact: true
+          upload-release-assets: true
+
+      - name: Generate SBOM (linux/arm64)
+        uses: anchore/sbom-action@v0
+        with:
+          artifact-name: sbom-linux-arm64.spdx.json
+          output-file: sbom-linux-arm64.spdx.json
+          format: spdx-json
+          upload-artifact: true
+          upload-release-assets: true
+
+      - name: Generate SBOM (darwin/arm64)
+        uses: anchore/sbom-action@v0
+        with:
+          artifact-name: sbom-darwin-arm64.spdx.json
+          output-file: sbom-darwin-arm64.spdx.json
+          format: spdx-json
+          upload-artifact: true
+          upload-release-assets: true
+
+      - name: Generate SBOM (darwin/amd64)
+        uses: anchore/sbom-action@v0
+        with:
+          artifact-name: sbom-darwin-amd64.spdx.json
+          output-file: sbom-darwin-amd64.spdx.json
+          format: spdx-json
+          upload-artifact: true
+          upload-release-assets: true

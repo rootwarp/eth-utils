@@ -32,8 +32,12 @@ before:
     - go -C go mod verify
 
 builds:
-  # darwin builds — compiled natively on macOS runners in CI.
-  - id: darwin
+  # darwin builds — natively on macOS runners in local snapshot;
+  # cross-compiled via osxcross in CI (goreleaser-cross container).
+  # CC_FOR_DARWIN_AMD64 / CC_FOR_DARWIN_ARM64 are set in CI to the osxcross
+  # wrappers (o64-clang / oa64-clang). When unset (local macOS build), "cc"
+  # (Xcode clang) is used.
+  - id: darwin-amd64
     main: ./cmd/eth-deposit-gen
     dir: go
     binary: eth-deposit-gen
@@ -41,9 +45,28 @@ builds:
       - darwin
     goarch:
       - amd64
+    env:
+      - CGO_ENABLED=1
+      - 'CC={{ if index .Env "CC_FOR_DARWIN_AMD64" }}{{ .Env.CC_FOR_DARWIN_AMD64 }}{{ else }}cc{{ end }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: darwin-arm64
+    main: ./cmd/eth-deposit-gen
+    dir: go
+    binary: eth-deposit-gen
+    goos:
+      - darwin
+    goarch:
       - arm64
     env:
       - CGO_ENABLED=1
+      - 'CC={{ if index .Env "CC_FOR_DARWIN_ARM64" }}{{ .Env.CC_FOR_DARWIN_ARM64 }}{{ else }}cc{{ end }}'
     flags:
       - -trimpath
     ldflags:
@@ -95,7 +118,8 @@ builds:
 archives:
   - id: default
     ids:
-      - darwin
+      - darwin-amd64
+      - darwin-arm64
       - linux-amd64
       - linux-arm64
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
