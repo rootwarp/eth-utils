@@ -182,10 +182,13 @@ OPTIONS:
 		// Validation order: network first (per spec), then mainnet ack, then pubkeys,
 		// then keystore-dir (directory readability probe), then output-dir.
 
-		// 1. Parse and validate --network
+		// 1. Parse and validate --network (eth-deposit-gen only supports mainnet and hoodi)
 		net, err := network.ParseFlag(c.String("network"))
 		if err != nil {
 			return ucli.Exit(fmt.Sprintf("--network: %v", err), 2)
+		}
+		if net != network.Mainnet && net != network.Hoodi {
+			return ucli.Exit(fmt.Sprintf(`--network: %q is not supported by eth-deposit-gen; must be %q or %q`, net, network.Mainnet, network.Hoodi), 2)
 		}
 
 		// 1a. Mainnet safety gate: require explicit operator acknowledgement before
