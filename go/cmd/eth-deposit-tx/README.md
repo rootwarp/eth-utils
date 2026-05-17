@@ -2,18 +2,19 @@
 
 Build and sign Ethereum Beacon Chain deposit transactions from Launchpad-compatible `deposit_data` JSON.
 
-**Phase 3 status:** both `build` and `sign` commands work end-to-end. The `sign` command supports local private-key signing (for development/CI) and Ledger hardware wallet signing (recommended for real funds).
+**Phase 4 status:** the `run` command (build + sign in one step) is now available. All three subcommands (`build`, `sign`, `run`) work end-to-end. Signing supports local private-key (development/CI) and Ledger hardware wallet (recommended for real funds).
 
-> Note: `--rpc-url` is accepted by the CLI for forward compatibility but is not yet wired to a live RPC client. The `build` command currently operates in static-config mode only — provide gas/fee/nonce flags explicitly or rely on defaults. RPC-based gas/nonce estimation will be plumbed in Phase 4.
+> Note: `--rpc-url` is accepted by the CLI for forward compatibility but is not yet wired to a live RPC client. The `build` command currently operates in static-config mode only — provide gas/fee/nonce flags explicitly or rely on defaults. RPC-based gas/nonce estimation will be plumbed in Phase 4.2.
 
 ## Overview
 
-`eth-deposit-tx` converts the `deposit_data` JSON produced by `eth-deposit-gen` (or the official Ethereum Launchpad) into raw Ethereum transactions ready for the Beacon Chain deposit contract. It is designed around a secure two-phase workflow:
+`eth-deposit-tx` converts the `deposit_data` JSON produced by `eth-deposit-gen` (or the official Ethereum Launchpad) into raw Ethereum transactions ready for the Beacon Chain deposit contract. It supports three subcommands:
 
-1. **build** — construct an unsigned transaction (can run fully offline / air-gapped)
-2. **sign** — sign the transaction, primarily via Ledger hardware wallet
+1. **build** — construct an unsigned transaction (runs fully offline / air-gapped)
+2. **sign** — sign a previously built unsigned transaction (Ledger or local key)
+3. **run** — convenience command that runs build + sign in one step on the same machine
 
-The two phases are intentionally separate so the unsigned transaction can be produced on an online machine and then transferred to a signing device that never touches the internet.
+The two-phase workflow (`build` then `sign`) is the canonical air-gapped path: produce the unsigned tx on an online machine, transfer it, and sign on a device that never touches the internet. Use `run` when both phases happen on the same machine and you want a single command.
 
 ## Install
 
@@ -27,9 +28,50 @@ go install ./cmd/eth-deposit-tx
 go build -o eth-deposit-tx ./cmd/eth-deposit-tx
 ```
 
-## Quick Start (Phase 3)
+## Quick Start
 
-**Step 1 — build the unsigned transaction:**
+### Convenience: build + sign in one step (`run`)
+
+Use `run` when the online machine is also your signing machine (e.g., CI with a dev key):
+
+```bash
+# Development / CI (local key from env var):
+export ETH_DEPOSIT_TX_PRIVATE_KEY=0x<your-dev-hex-private-key>
+eth-deposit-tx run \
+  --network holesky \
+  --input-file deposit_data.json \
+  --signer local \
+  --output signed.json
+# Produces: signed.json (full SignedTx JSON) + signed.raw (0x-prefixed RLP hex)
+```
+
+```bash
+# Ledger hardware wallet (recommended for real funds):
+eth-deposit-tx run \
+  --network holesky \
+  --input-file deposit_data.json \
+  --signer ledger \
+  --output signed.json
+# Prompts for on-device confirmation. Produces signed.json + signed.raw.
+```
+
+Use `--keep-unsigned` to also write the unsigned tx (useful for auditing):
+
+```bash
+eth-deposit-tx run \
+  --network holesky \
+  --input-file deposit_data.json \
+  --signer local \
+  --output signed.json \
+  --keep-unsigned
+# Produces: unsigned.json, signed.json, signed.raw
+```
+
+### Air-gapped workflow: `build` then `sign` on separate machines
+
+Use when the signing device must never touch the internet:
+
+**Step 1 — build the unsigned transaction (on the online machine):**
 
 ```bash
 eth-deposit-tx build \
@@ -37,6 +79,8 @@ eth-deposit-tx build \
   --input-file deposit_data.json \
   --output unsigned.json
 ```
+
+Transfer `unsigned.json` to the air-gapped signing device.
 
 **Step 2a — sign with Ledger (recommended):**
 
@@ -83,6 +127,28 @@ eth-deposit-tx sign \
 | `--input`, `-i` | *(required)* | Path to unsigned tx JSON (from `build`), or `-` for stdin |
 | `--output`, `-o` | stdout | Output file for the signed transaction |
 | `--private-key-env` | `ETH_DEPOSIT_TX_PRIVATE_KEY` | Env var name holding the hex private key (local signer only) |
+
+### `run` subcommand
+
+Inherits all `build` flags (see above) plus:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--signer` | *(required)* | Signing method: `local` or `ledger` |
+| `--output` | `ETH_DEPOSIT_TX_OUTPUT` / stdout | Output file for the signed transaction |
+| `--private-key-env` | `ETH_DEPOSIT_TX_PRIVATE_KEY` | Env var name holding the hex private key (local signer only) |
+| `--keep-unsigned` | false | Also write the unsigned tx to disk before signing (requires `--output` to be a file) |
+| `--raw-output` | *(auto-derived)* | Override the companion `.raw` filename; default is `<output-stem>.raw` next to `--output` |
+
+**Output artifacts when `--output signed.json` is given:**
+
+| File | Permissions | Content |
+|------|-------------|---------|
+| `signed.json` | `0o600` | Full `SignedTx` JSON (unsigned tx + from, hash, r, s, v, rawRLP) |
+| `signed.raw` | `0o600` | `0x`-prefixed RLP hex — pass directly to `eth_sendRawTransaction` |
+| `unsigned.json` | `0o644` | Unsigned tx JSON (only when `--keep-unsigned`) |
+
+When `--output` is omitted or `-`, only `SignedTx` JSON is written to stdout; no companion `.raw` file is produced.
 
 Flag values take precedence over environment variables.
 
