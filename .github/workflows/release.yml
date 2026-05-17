@@ -188,6 +188,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The goreleaser-cross container runs goreleaser as a different UID than
+      # the one that owns the workspace files (host runner user). Git refuses
+      # to operate on a repo it considers "owned by someone else", so the
+      # "getting and validating git state" step fails with
+      # "current folder is not a git repository". Marking the workspace as
+      # safe.directory bypasses the ownership check inside the container.
+      - name: Mark workspace as a safe git directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Run GoReleaser
         run: goreleaser release --clean
         env:
