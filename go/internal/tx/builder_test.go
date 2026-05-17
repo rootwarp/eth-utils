@@ -96,7 +96,7 @@ func TestBuilder_BuildUnsigned_NilContext(t *testing.T) {
 	}
 
 	b := NewBuilder()
-	//nolint:staticcheck
+	//lint:ignore SA1012 intentionally testing nil context rejection
 	_, err := b.BuildUnsigned(nil, entry, cfg)
 	if err == nil {
 		t.Fatal("expected error for nil context, got nil")
