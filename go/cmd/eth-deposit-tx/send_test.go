@@ -137,6 +137,14 @@ func TestSendCommand_HappyPath(t *testing.T) {
 	if !strings.Contains(outStr, "holesky.etherscan.io") {
 		t.Errorf("output missing explorer URL; got: %s", outStr)
 	}
+
+	// Verify the confirmation prompt was printed to stderr with the expected fields.
+	errStr := errOut.String()
+	for _, want := range []string{"32.000000 ETH", "chain ID 17000", "holesky", "Broadcasting"} {
+		if !strings.Contains(errStr, want) {
+			t.Errorf("stderr prompt missing %q; got:\n%s", want, errStr)
+		}
+	}
 }
 
 func TestSendCommand_ConfirmPrompt_Accept(t *testing.T) {
