@@ -607,8 +607,8 @@ func TestBuilder_BuildUnsigned_RPCMode_MaxFeeFormula(t *testing.T) {
 	var from [20]byte
 	from[0] = 0x07
 
-	baseFee := big.NewInt(10_000_000_000) // 10 gwei
-	tip := big.NewInt(2_000_000_000)      // 2 gwei
+	baseFee := big.NewInt(10_000_000_000)    // 10 gwei
+	tip := big.NewInt(2_000_000_000)         // 2 gwei
 	wantMaxFee := big.NewInt(22_000_000_000) // 2*10 + 2 = 22 gwei
 
 	rpc := makeMockRPC(params.ChainID)
@@ -635,5 +635,96 @@ func TestBuilder_BuildUnsigned_RPCMode_MaxFeeFormula(t *testing.T) {
 	wantHex := "0x" + fmt.Sprintf("%x", wantMaxFee)
 	if tx.MaxFeePerGas != wantHex {
 		t.Errorf("MaxFeePerGas: got %s, want %s (2*baseFee+tip)", tx.MaxFeePerGas, wantHex)
+	}
+}
+
+func TestBuilder_BuildUnsigned_RPCMode_SuggestGasTipCapError(t *testing.T) {
+	ctx := context.Background()
+	entry := makeValidEntry()
+	params := holeskyParams(t)
+
+	var from [20]byte
+	from[0] = 0x08
+
+	rpc := makeMockRPC(params.ChainID)
+	rpc.SuggestGasTipCapFn = func(_ context.Context) (*big.Int, error) {
+		return nil, errors.New("tip cap rpc error")
+	}
+
+	cfg := BuildConfig{
+		NetworkParams: params,
+		RPC:           rpc,
+		From:          from,
+		// MaxPriorityFeePerGas nil → triggers SuggestGasTipCap
+	}
+	b := NewBuilder()
+	_, err := b.BuildUnsigned(ctx, entry, cfg)
+	if err == nil {
+		t.Fatal("expected error from SuggestGasTipCap, got nil")
+	}
+	if !strings.Contains(err.Error(), "SuggestGasTipCap") {
+		t.Errorf("error should mention SuggestGasTipCap, got: %v", err)
+	}
+}
+
+func TestBuilder_BuildUnsigned_RPCMode_BlockBaseFeeError(t *testing.T) {
+	ctx := context.Background()
+	entry := makeValidEntry()
+	params := holeskyParams(t)
+
+	var from [20]byte
+	from[0] = 0x09
+
+	rpc := makeMockRPC(params.ChainID)
+	rpc.BlockBaseFeeFn = func(_ context.Context) (*big.Int, error) {
+		return nil, errors.New("base fee rpc error")
+	}
+
+	nonce := uint64(0)
+	cfg := BuildConfig{
+		NetworkParams: params,
+		RPC:           rpc,
+		From:          from,
+		Nonce:         &nonce,
+		GasLimit:      200_000,
+		// MaxFeePerGas nil → triggers BlockBaseFee
+	}
+	b := NewBuilder()
+	_, err := b.BuildUnsigned(ctx, entry, cfg)
+	if err == nil {
+		t.Fatal("expected error from BlockBaseFee, got nil")
+	}
+	if !strings.Contains(err.Error(), "BlockBaseFee") {
+		t.Errorf("error should mention BlockBaseFee, got: %v", err)
+	}
+}
+
+func TestBuilder_BuildUnsigned_RPCMode_PendingNonceAtError(t *testing.T) {
+	ctx := context.Background()
+	entry := makeValidEntry()
+	params := holeskyParams(t)
+
+	var from [20]byte
+	from[0] = 0x0a
+
+	rpc := makeMockRPC(params.ChainID)
+	rpc.PendingNonceAtFn = func(_ context.Context, _ [20]byte) (uint64, error) {
+		return 0, errors.New("nonce rpc error")
+	}
+
+	cfg := BuildConfig{
+		NetworkParams: params,
+		RPC:           rpc,
+		From:          from,
+		GasLimit:      200_000,
+		// Nonce nil → triggers PendingNonceAt
+	}
+	b := NewBuilder()
+	_, err := b.BuildUnsigned(ctx, entry, cfg)
+	if err == nil {
+		t.Fatal("expected error from PendingNonceAt, got nil")
+	}
+	if !strings.Contains(err.Error(), "PendingNonceAt") {
+		t.Errorf("error should mention PendingNonceAt, got: %v", err)
 	}
 }
