@@ -17,22 +17,37 @@ type mockRPC struct {
 }
 
 func (m *mockRPC) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
+	if m.SuggestGasTipCapFn == nil {
+		panic("mockRPC.SuggestGasTipCap not set")
+	}
 	return m.SuggestGasTipCapFn(ctx)
 }
 
 func (m *mockRPC) BlockBaseFee(ctx context.Context) (*big.Int, error) {
+	if m.BlockBaseFeeFn == nil {
+		panic("mockRPC.BlockBaseFee not set")
+	}
 	return m.BlockBaseFeeFn(ctx)
 }
 
 func (m *mockRPC) PendingNonceAt(ctx context.Context, account [20]byte) (uint64, error) {
+	if m.PendingNonceAtFn == nil {
+		panic("mockRPC.PendingNonceAt not set")
+	}
 	return m.PendingNonceAtFn(ctx, account)
 }
 
 func (m *mockRPC) EstimateGas(ctx context.Context, msg CallMsg) (uint64, error) {
+	if m.EstimateGasFn == nil {
+		panic("mockRPC.EstimateGas not set")
+	}
 	return m.EstimateGasFn(ctx, msg)
 }
 
 func (m *mockRPC) ChainID(ctx context.Context) (*big.Int, error) {
+	if m.ChainIDFn == nil {
+		panic("mockRPC.ChainID not set")
+	}
 	return m.ChainIDFn(ctx)
 }
 
