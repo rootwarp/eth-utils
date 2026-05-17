@@ -13,6 +13,7 @@ jobs:
 
     env:
       CGO_ENABLED: 1
+      GOFLAGS: -mod=readonly
 
     steps:
       - name: Checkout

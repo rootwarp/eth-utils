@@ -19,6 +19,7 @@ jobs:
 
     env:
       CGO_ENABLED: "1"
+      GOFLAGS: -mod=readonly
 
     steps:
       - name: Checkout
@@ -63,6 +64,7 @@ jobs:
 
     env:
       CGO_ENABLED: "1"
+      GOFLAGS: -mod=readonly
 
     steps:
       - name: Checkout
@@ -121,6 +123,7 @@ jobs:
 
     env:
       CGO_ENABLED: "1"
+      GOFLAGS: -mod=readonly
 
     steps:
       - name: Checkout
@@ -172,6 +175,7 @@ jobs:
 
     env:
       CGO_ENABLED: "1"
+      GOFLAGS: -mod=readonly
       # Cross-compiler env vars read by .goreleaser.yaml build configs.
       CC_FOR_LINUX_AMD64: x86_64-linux-gnu-gcc
       CC_FOR_LINUX_ARM64: aarch64-linux-gnu-gcc
