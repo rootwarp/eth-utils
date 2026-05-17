@@ -1,18 +1,17 @@
 # eth-deposit-tx
 
-Build and sign Ethereum Beacon Chain deposit transactions from Launchpad-compatible `deposit_data` JSON.
+Build, sign, and broadcast Ethereum Beacon Chain deposit transactions from Launchpad-compatible `deposit_data` JSON.
 
-**Phase 4 status:** the `run` command (build + sign in one step) is now available. All three subcommands (`build`, `sign`, `run`) work end-to-end. Signing supports local private-key (development/CI) and Ledger hardware wallet (recommended for real funds).
-
-> Note: `--rpc-url` is accepted by the CLI for forward compatibility but is not yet wired to a live RPC client. The `build` command currently operates in static-config mode only — provide gas/fee/nonce flags explicitly or rely on defaults. RPC-based gas/nonce estimation will be plumbed in Phase 4.2.
+**Phase 4.2 status:** `send` subcommand is now available for broadcasting signed transactions via JSON-RPC. All four subcommands (`build`, `sign`, `run`, `send`) work end-to-end.
 
 ## Overview
 
-`eth-deposit-tx` converts the `deposit_data` JSON produced by `eth-deposit-gen` (or the official Ethereum Launchpad) into raw Ethereum transactions ready for the Beacon Chain deposit contract. It supports three subcommands:
+`eth-deposit-tx` converts the `deposit_data` JSON produced by `eth-deposit-gen` (or the official Ethereum Launchpad) into raw Ethereum transactions ready for the Beacon Chain deposit contract. It supports four subcommands:
 
 1. **build** — construct an unsigned transaction (runs fully offline / air-gapped)
 2. **sign** — sign a previously built unsigned transaction (Ledger or local key)
 3. **run** — convenience command that runs build + sign in one step on the same machine
+4. **send** — broadcast a signed transaction via JSON-RPC (requires explicit network-name confirmation)
 
 The two-phase workflow (`build` then `sign`) is the canonical air-gapped path: produce the unsigned tx on an online machine, transfer it, and sign on a device that never touches the internet. Use `run` when both phases happen on the same machine and you want a single command.
 
@@ -103,6 +102,55 @@ eth-deposit-tx sign \
   --output signed.json
 ```
 
+**Step 3 — broadcast with `send`:**
+
+```bash
+eth-deposit-tx send \
+  --input signed.json \
+  --rpc-url https://holesky.example/rpc
+# Prompts you to type the network name to confirm before broadcasting.
+```
+
+### Broadcast: `send`
+
+> **WARNING: `send` broadcasts to the live network and spends real ETH. There is no undo.**
+
+The `send` command requires you to type the network name (e.g., `holesky`) to confirm before submitting. Use `--yes` to bypass the prompt in automation.
+
+```bash
+# Interactive confirmation (default):
+eth-deposit-tx send \
+  --input signed.json \
+  --rpc-url https://holesky.infura.io/v3/<key>
+
+# Output:
+# > You are about to BROADCAST a 32.000000 ETH deposit transaction.
+# >   Network:        holesky (chain ID 17000)
+# >   From:           0xabcd...
+# >   ...
+# > Type the network name to confirm:
+# holesky
+# > Broadcasting...
+# Tx hash: 0xdeadbeef...
+# Explorer: https://holesky.etherscan.io/tx/0xdeadbeef...
+
+# Non-interactive (CI/automation):
+eth-deposit-tx send \
+  --input signed.json \
+  --rpc-url https://holesky.infura.io/v3/<key> \
+  --yes
+
+# Wait for receipt and save it:
+eth-deposit-tx send \
+  --input signed.json \
+  --rpc-url https://holesky.infura.io/v3/<key> \
+  --yes \
+  --wait-for-receipt \
+  --receipt-output receipt.json
+```
+
+**Chain ID safety check:** `send` fetches the chain ID from the RPC node and compares it to the signed tx's chain ID. If they differ, broadcast is refused (exit 5). This prevents accidentally broadcasting a Holesky-signed tx to mainnet.
+
 ## Flag reference
 
 ### `build` subcommand
@@ -140,6 +188,17 @@ Inherits all `build` flags (see above) plus:
 | `--keep-unsigned` | false | Also write the unsigned tx to disk before signing (requires `--output` to be a file) |
 | `--raw-output` | *(auto-derived)* | Override the companion `.raw` filename; default is `<output-stem>.raw` next to `--output` |
 
+### `send` subcommand
+
+| Flag | Env var | Default | Description |
+|------|---------|---------|-------------|
+| `--input`, `-i` | *(none)* | *(required)* | Path to signed tx JSON (from `sign` or `run`), or `-` for stdin |
+| `--rpc-url` | `ETH_DEPOSIT_TX_RPC_URL` | *(required)* | JSON-RPC endpoint URL for broadcast |
+| `--yes` | *(none)* | false | Skip the interactive network-name confirmation prompt |
+| `--wait-for-receipt` | *(none)* | false | Poll until the transaction receipt is available |
+| `--receipt-timeout` | *(none)* | `60s` | Maximum wait time for receipt when `--wait-for-receipt` is set |
+| `--receipt-output` | *(none)* | *(none)* | Write the receipt JSON to this file (implies `--wait-for-receipt`) |
+
 **Output artifacts when `--output signed.json` is given:**
 
 | File | Permissions | Content |
@@ -160,7 +219,8 @@ Flag values take precedence over environment variables.
 | 1 | Unexpected / internal error |
 | 2 | User / configuration error (bad input, unknown network, missing file, invalid `--signer`) |
 | 3 | Signer / crypto error (bad private key, no Ledger device, Ethereum app not open, chain ID mismatch) |
-| 4 | User abort (SIGINT / Ctrl-C, or transaction rejected on Ledger device) |
+| 4 | User abort (SIGINT / Ctrl-C, Ledger device rejection, or declined `send` confirmation) |
+| 5 | Broadcast / RPC error (dial failure, `eth_sendRawTransaction` rejection, chain ID mismatch between signed tx and RPC node) |
 
 ## Security
 
@@ -217,7 +277,8 @@ See [`docs/deposit-tx/security/phase-3-signer.md`](../../docs/deposit-tx/securit
 - **Phase 1 (done):** CLI scaffold, config resolution, stub `build` command producing unsigned tx JSON.
 - **Phase 2 (done):** Real ABI encoding for `deposit(bytes,bytes,bytes,bytes32)`. Output is fully ABI-accurate. Golden artifact and round-trip decode tests committed.
 - **Phase 3 (done):** `sign` command — Ledger hardware wallet (primary) and `ETH_DEPOSIT_TX_PRIVATE_KEY` env-var fallback (with strong warnings). Both signers fully implemented and tested. Security review, golden artifact, and hardware runbook committed. Pending: first successful hardware test on real device.
-- **Phase 4:** Optional `broadcast` command to submit the signed transaction via JSON-RPC; also wires `--rpc-url` for live gas/nonce estimation.
+- **Phase 4.1 (done):** `run` command (build + sign in one step), RPC wiring for gas/nonce estimation.
+- **Phase 4.2 (done):** `send` command — broadcast via JSON-RPC with double-confirmation prompt, chain ID safety check, receipt polling, and receipt file output.
 
 ## For contributors
 
