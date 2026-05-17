@@ -435,6 +435,40 @@ func TestRunCommand_OutputFilePermissions(t *testing.T) {
 	}
 }
 
+func TestRunCommand_OutputDash_IsStdout(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	envVar := "TEST_RUN_KEY_DASH_" + randomSuffix(t)
+	t.Setenv(envVar, "0x"+generateTestPrivKey(t))
+
+	app := newTestApp()
+	var out bytes.Buffer
+	app.Writer = &out
+	app.ErrWriter = &bytes.Buffer{}
+
+	err := app.Run([]string{
+		"eth-deposit-tx", "run",
+		"--network", "holesky",
+		"--input-file", fixtureAbsPath(t),
+		"--signer", "local",
+		"--output", "-",
+		"--private-key-env", envVar,
+	})
+	if err != nil {
+		t.Fatalf("--output -: unexpected error: %v", err)
+	}
+	if !json.Valid(out.Bytes()) {
+		t.Errorf("--output -: output is not valid JSON: %s", out.String())
+	}
+	// No signed.raw should appear anywhere (stdout mode).
+	matches, _ := filepath.Glob(filepath.Join(t.TempDir(), "*.raw"))
+	if len(matches) > 0 {
+		t.Errorf("--output -: unexpected .raw files: %v", matches)
+	}
+}
+
 func TestRunSubcommand_Help(t *testing.T) {
 	app := newTestApp()
 	var buf bytes.Buffer

@@ -175,7 +175,7 @@ Example (read deposit data from stdin):
 			}
 			out = append(out, '\n')
 
-			if cfg.OutputFile == "" {
+			if cfg.OutputFile == "" || cfg.OutputFile == "-" {
 				_, err = c.App.Writer.Write(out)
 				return err
 			}

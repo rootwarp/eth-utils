@@ -60,7 +60,7 @@ func LoadRunConfig(c *ucli.Context) (*RunConfig, error) {
 
 	keepUnsigned := c.Bool("keep-unsigned")
 	outputFile := c.String("output")
-	if keepUnsigned && outputFile == "" {
+	if keepUnsigned && (outputFile == "" || outputFile == "-") {
 		return nil, ucli.Exit("--keep-unsigned requires --output to be a file path (cannot be used with stdout)", 2)
 	}
 
@@ -257,7 +257,7 @@ func runAction(c *ucli.Context, cfg *RunConfig) error {
 	signedJSON = append(signedJSON, '\n')
 
 	// 6. Write output.
-	if cfg.OutputFile == "" {
+	if cfg.OutputFile == "" || cfg.OutputFile == "-" {
 		_, err = c.App.Writer.Write(signedJSON)
 		return err
 	}

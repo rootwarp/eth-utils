@@ -310,6 +310,31 @@ func TestBuildSubcommand_Action_BadNetwork(t *testing.T) {
 	}
 }
 
+func TestBuildSubcommand_Action_OutputDash_IsStdout(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	fixture := fixtureAbsPath(t)
+
+	app := newTestApp()
+	var out bytes.Buffer
+	app.Writer = &out
+	app.ErrWriter = &bytes.Buffer{}
+
+	err := app.Run([]string{
+		"eth-deposit-tx", "build",
+		"--network", "holesky",
+		"--input-file", fixture,
+		"--output", "-",
+	})
+	if err != nil {
+		t.Fatalf("--output -: unexpected error: %v", err)
+	}
+	if !json.Valid(out.Bytes()) {
+		t.Errorf("--output -: output is not valid JSON: %s", out.String())
+	}
+}
 
 // newTestApp returns a minimal app instance for testing (avoids side effects of the real main).
 func newTestApp() *ucli.App {
