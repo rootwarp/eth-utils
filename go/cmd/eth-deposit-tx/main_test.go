@@ -77,8 +77,8 @@ func TestApp_Help(t *testing.T) {
 	if !strings.Contains(s, "eth-deposit-tx") {
 		t.Errorf("help output missing app name")
 	}
-	if !strings.Contains(s, "build") || !strings.Contains(s, "sign") {
-		t.Errorf("help output missing expected subcommands build/sign")
+	if !strings.Contains(s, "build") || !strings.Contains(s, "sign") || !strings.Contains(s, "run") {
+		t.Errorf("help output missing expected subcommands build/sign/run")
 	}
 }
 
@@ -317,7 +317,7 @@ func newTestApp() *ucli.App {
 		Name:     "eth-deposit-tx",
 		Usage:    "Create and sign Ethereum deposit transactions from deposit data JSON",
 		Version:  "dev",
-		Commands: []*ucli.Command{buildCommand(), signCommand()},
+		Commands: []*ucli.Command{buildCommand(), signCommand(), runCommand()},
 	}
 }
 

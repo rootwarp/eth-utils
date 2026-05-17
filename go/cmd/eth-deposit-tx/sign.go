@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -148,43 +149,20 @@ func signAction(c *ucli.Context, cfg *SignConfig) error {
 		return ucli.Exit(fmt.Sprintf("invalid input JSON: %v", err), 2)
 	}
 
-	// 3. Construct signer.
-	var s signer.Signer
-	switch cfg.Signer {
-	case "local":
-		ls, err := signer.NewLocalSignerFromEnv(cfg.PrivateKeyEnvVar)
-		if err != nil {
-			return fmt.Errorf("local signer: %w", err)
-		}
-		s = ls
-	case "ledger":
-		ls, err := signer.NewLedgerSigner()
-		if err != nil {
-			return fmt.Errorf("ledger signer: %w", err)
-		}
-		s = ls
-	}
-	defer func() { _ = s.Close() }()
-
-	// 4. Prompt if device interaction is needed.
-	if s.RequiresUserInteraction() {
-		fmt.Fprintf(c.App.ErrWriter, "Waiting for confirmation on Ledger device...\n")
-	}
-
-	// 5. Sign.
-	signed, err := s.Sign(c.Context, unsigned)
+	// 3. Sign.
+	signed, err := signUnsignedTx(c.Context, cfg, c.App.ErrWriter, unsigned)
 	if err != nil {
-		return fmt.Errorf("sign (%s): %w", cfg.Signer, err)
+		return err
 	}
 
-	// 6. Marshal output.
+	// 4. Marshal output.
 	out, err := json.MarshalIndent(signed, "", "  ")
 	if err != nil {
 		return fmt.Errorf("sign: marshal: %w", err)
 	}
 	out = append(out, '\n')
 
-	// 7. Write output.
+	// 5. Write output.
 	if cfg.OutputFile == "" {
 		_, err = c.App.Writer.Write(out)
 		return err
@@ -195,4 +173,38 @@ func signAction(c *ucli.Context, cfg *SignConfig) error {
 	}
 	slog.Info("wrote signed tx", "path", cfg.OutputFile, "signer", cfg.Signer)
 	return nil
+}
+
+// signUnsignedTx constructs a signer and produces a SignedTx for the given unsigned tx.
+// errWriter is used for interactive device prompts (may be nil for tests that suppress output).
+// It is extracted so runAction can call it without serializing to disk between build and sign.
+func signUnsignedTx(ctx context.Context, cfg *SignConfig, errWriter io.Writer, unsigned internaltx.UnsignedTx) (*signer.SignedTx, error) {
+	// 1. Construct signer.
+	var s signer.Signer
+	var err error
+	switch cfg.Signer {
+	case "local":
+		s, err = signer.NewLocalSignerFromEnv(cfg.PrivateKeyEnvVar)
+		if err != nil {
+			return nil, fmt.Errorf("local signer: %w", err)
+		}
+	case "ledger":
+		s, err = signer.NewLedgerSigner()
+		if err != nil {
+			return nil, fmt.Errorf("ledger signer: %w", err)
+		}
+	}
+	defer func() { _ = s.Close() }()
+
+	// 2. Prompt if device interaction is needed.
+	if s.RequiresUserInteraction() && errWriter != nil {
+		fmt.Fprintf(errWriter, "Waiting for confirmation on Ledger device...\n")
+	}
+
+	// 3. Sign.
+	signed, err := s.Sign(ctx, unsigned)
+	if err != nil {
+		return nil, fmt.Errorf("sign (%s): %w", cfg.Signer, err)
+	}
+	return signed, nil
 }

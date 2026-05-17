@@ -1,5 +1,5 @@
 // Package main is the entry point for eth-deposit-tx.
-// It sets up the urfave/cli/v2 application and wires the build and sign subcommands.
+// It sets up the urfave/cli/v2 application and wires the build, sign, and run subcommands.
 //
 // Exit codes:
 //
@@ -44,7 +44,8 @@ func main() {
 		Name:  "eth-deposit-tx",
 		Usage: "Create and sign Ethereum deposit transactions from deposit data JSON",
 		UsageText: `eth-deposit-tx build [options]
-   eth-deposit-tx sign [options]`,
+   eth-deposit-tx sign [options]
+   eth-deposit-tx run [options]`,
 		Version: fmt.Sprintf("%s (commit=%s, built=%s)", version, commit, date),
 		Description: `eth-deposit-tx converts Launchpad-compatible deposit_data JSON into raw Ethereum transactions
 for the Beacon Chain deposit contract.
@@ -52,6 +53,7 @@ for the Beacon Chain deposit contract.
 It supports a secure two-phase workflow:
   build  - Construct an unsigned transaction (supports offline/air-gapped mode)
   sign   - Sign the transaction, with Ledger hardware as the primary method
+  run    - Convenience: build + sign in one step (same machine, no serialization to disk)
 
 The tool produces standard hex-encoded RLP output ready for eth_sendRawTransaction.
 
@@ -59,6 +61,7 @@ Exit codes: 0=success, 1=internal error, 2=bad input, 3=signer/crypto error, 4=u
 		Commands: []*ucli.Command{
 			buildCommand(),
 			signCommand(),
+			runCommand(),
 		},
 		// Suppress urfave's default ExitCoder printer; we log via slog below.
 		ExitErrHandler: func(_ *ucli.Context, _ error) {},
@@ -158,49 +161,9 @@ Example (read deposit data from stdin):
 				return ucli.Exit(fmt.Sprintf("--input-file: %v", err), 2)
 			}
 
-			entries, err := deposit.EntriesFromJSON(rawData)
+			unsignedTx, err := buildUnsignedTx(c.Context, cfg, rawData)
 			if err != nil {
-				return ucli.Exit(fmt.Sprintf("--input-file: invalid JSON: %v", err), 2)
-			}
-			if len(entries) == 0 {
-				return ucli.Exit("--input-file: file contains no deposit entries", 2)
-			}
-			if cfg.Index < 0 || cfg.Index >= len(entries) {
-				return ucli.Exit(fmt.Sprintf("--index %d: out of bounds (file has %d entries)", cfg.Index, len(entries)), 2)
-			}
-			entry := entries[cfg.Index]
-
-			if err := entry.Validate(); err != nil {
-				return ucli.Exit(fmt.Sprintf("deposit entry validation: %v", err), 2)
-			}
-
-			buildCfg := internaltx.BuildConfig{
-				NetworkParams:        cfg.NetworkParams,
-				RPCURL:               cfg.RPCURL,
-				GasLimit:             cfg.GasLimit,
-				MaxFeePerGas:         cfg.MaxFeePerGas,
-				MaxPriorityFeePerGas: cfg.MaxPriorityFeePerGas,
-				Nonce:                cfg.Nonce,
-				// RPC and From remain zero — static-config mode only (Phase 4 wires RPC).
-			}
-			if buildCfg.MaxFeePerGas == nil {
-				buildCfg.MaxFeePerGas = defaultMaxFeePerGas()
-			}
-			if buildCfg.MaxPriorityFeePerGas == nil {
-				buildCfg.MaxPriorityFeePerGas = defaultMaxPriorityFeePerGas()
-			}
-			if buildCfg.GasLimit == 0 {
-				buildCfg.GasLimit = defaultGasLimit
-			}
-			if buildCfg.Nonce == nil {
-				var z uint64
-				buildCfg.Nonce = &z
-			}
-
-			builder := internaltx.NewBuilder()
-			unsignedTx, err := builder.BuildUnsigned(c.Context, entry, buildCfg)
-			if err != nil {
-				return WrapInputErr("build", err)
+				return err
 			}
 
 			out, err := json.MarshalIndent(unsignedTx, "", "  ")
@@ -220,5 +183,54 @@ Example (read deposit data from stdin):
 			return nil
 		},
 	}
+}
+
+// buildUnsignedTx converts raw deposit data bytes + build config into an UnsignedTx.
+// It is extracted so runAction can call it without re-reading from disk.
+func buildUnsignedTx(ctx context.Context, cfg *Config, rawData []byte) (*internaltx.UnsignedTx, error) {
+	entries, err := deposit.EntriesFromJSON(rawData)
+	if err != nil {
+		return nil, ucli.Exit(fmt.Sprintf("--input-file: invalid JSON: %v", err), 2)
+	}
+	if len(entries) == 0 {
+		return nil, ucli.Exit("--input-file: file contains no deposit entries", 2)
+	}
+	if cfg.Index < 0 || cfg.Index >= len(entries) {
+		return nil, ucli.Exit(fmt.Sprintf("--index %d: out of bounds (file has %d entries)", cfg.Index, len(entries)), 2)
+	}
+	entry := entries[cfg.Index]
+
+	if err := entry.Validate(); err != nil {
+		return nil, ucli.Exit(fmt.Sprintf("deposit entry validation: %v", err), 2)
+	}
+
+	buildCfg := internaltx.BuildConfig{
+		NetworkParams:        cfg.NetworkParams,
+		RPCURL:               cfg.RPCURL,
+		GasLimit:             cfg.GasLimit,
+		MaxFeePerGas:         cfg.MaxFeePerGas,
+		MaxPriorityFeePerGas: cfg.MaxPriorityFeePerGas,
+		Nonce:                cfg.Nonce,
+	}
+	if buildCfg.MaxFeePerGas == nil {
+		buildCfg.MaxFeePerGas = defaultMaxFeePerGas()
+	}
+	if buildCfg.MaxPriorityFeePerGas == nil {
+		buildCfg.MaxPriorityFeePerGas = defaultMaxPriorityFeePerGas()
+	}
+	if buildCfg.GasLimit == 0 {
+		buildCfg.GasLimit = defaultGasLimit
+	}
+	if buildCfg.Nonce == nil {
+		var z uint64
+		buildCfg.Nonce = &z
+	}
+
+	builder := internaltx.NewBuilder()
+	unsignedTx, err := builder.BuildUnsigned(ctx, entry, buildCfg)
+	if err != nil {
+		return nil, WrapInputErr("build", err)
+	}
+	return unsignedTx, nil
 }
 
