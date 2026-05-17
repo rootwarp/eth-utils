@@ -174,24 +174,31 @@ Example (read deposit data from stdin):
 				return ucli.Exit(fmt.Sprintf("deposit entry validation: %v", err), 2)
 			}
 
-			stubCfg := internaltx.StubConfig{
+			buildCfg := internaltx.BuildConfig{
 				NetworkParams:        cfg.NetworkParams,
 				RPCURL:               cfg.RPCURL,
 				GasLimit:             cfg.GasLimit,
 				MaxFeePerGas:         cfg.MaxFeePerGas,
 				MaxPriorityFeePerGas: cfg.MaxPriorityFeePerGas,
+				Nonce:                cfg.Nonce,
+				// RPC and From remain zero — static-config mode only (Phase 4 wires RPC).
 			}
-			if cfg.Nonce != nil {
-				stubCfg.Nonce = *cfg.Nonce
+			if buildCfg.MaxFeePerGas == nil {
+				buildCfg.MaxFeePerGas = defaultMaxFeePerGas()
 			}
-			if stubCfg.MaxFeePerGas == nil {
-				stubCfg.MaxFeePerGas = defaultMaxFeePerGas()
+			if buildCfg.MaxPriorityFeePerGas == nil {
+				buildCfg.MaxPriorityFeePerGas = defaultMaxPriorityFeePerGas()
 			}
-			if stubCfg.MaxPriorityFeePerGas == nil {
-				stubCfg.MaxPriorityFeePerGas = defaultMaxPriorityFeePerGas()
+			if buildCfg.GasLimit == 0 {
+				buildCfg.GasLimit = defaultGasLimit
+			}
+			if buildCfg.Nonce == nil {
+				var z uint64
+				buildCfg.Nonce = &z
 			}
 
-			unsignedTx, err := internaltx.BuildUnsigned(entry, stubCfg)
+			builder := internaltx.NewBuilder()
+			unsignedTx, err := builder.BuildUnsigned(c.Context, entry, buildCfg)
 			if err != nil {
 				return WrapInputErr("build", err)
 			}
