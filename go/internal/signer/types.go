@@ -16,7 +16,8 @@ type SignedTx struct {
 	R string `json:"r"`
 	// S is the signature S value, 0x-prefixed hex.
 	S string `json:"s"`
-	// V is the signature V value (for EIP-1559, this is the y-parity bit, 0 or 1).
+	// V is the signature V value. For EIP-1559 (type-2) transactions this is
+	// the y-parity bit encoded as a decimal string: "0" or "1".
 	V string `json:"v"`
 	// RawRLP is the 0x-prefixed hex RLP encoding of the signed transaction,
 	// directly usable with eth_sendRawTransaction.

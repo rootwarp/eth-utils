@@ -22,7 +22,7 @@ func (f *fakeSigner) Sign(_ context.Context, unsigned tx.UnsignedTx) (*signer.Si
 		Hash:     "0xabc123",
 		R:        "0x1",
 		S:        "0x2",
-		V:        "0x0",
+		V:        "0",
 		RawRLP:   "0xdeadbeef",
 	}, nil
 }
