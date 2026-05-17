@@ -19,4 +19,9 @@ var (
 	// RPC-mode sentinel errors.
 	ErrMissingFromForNonce = errors.New("from address required to fetch nonce via RPC")
 	ErrChainIDMismatch     = errors.New("RPC chain ID does not match configured network")
+
+	// Broadcast sentinel errors (exit code 5).
+	ErrRPCDial                  = errors.New("failed to dial RPC endpoint")
+	ErrBroadcastFailed          = errors.New("broadcast failed")
+	ErrBroadcastChainIDMismatch = errors.New("signed tx chain ID does not match RPC chain ID; refusing to broadcast")
 )
