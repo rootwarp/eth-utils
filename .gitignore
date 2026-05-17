@@ -6,7 +6,7 @@ go/go.work.sum
 go/bin/
 go/eth-deposit-gen
 go/eth-deposit-tx
-go/coverage*.out
+go/cover*.out
 *.exe
 *.exe~
 *.dll
