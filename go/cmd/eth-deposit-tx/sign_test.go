@@ -346,6 +346,108 @@ func TestSignCommand_Ledger_NotSupported_OnCGOPath(t *testing.T) {
 	_ = signer.ErrNoDevice // just to ensure the import is used
 }
 
+func TestSignCommand_InvalidEnvVarName_Lowercase(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	inFile := filepath.Join(t.TempDir(), "unsigned.json")
+	if err := os.WriteFile(inFile, unsignedTxJSON(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := newTestApp()
+	var buf bytes.Buffer
+	app.Writer = &buf
+	app.ErrWriter = &buf
+
+	err := app.Run([]string{
+		"eth-deposit-tx", "sign",
+		"--signer", "local",
+		"--input", inFile,
+		"--private-key-env", "my_lowercase_var",
+	})
+	if err == nil {
+		t.Fatal("expected error for lowercase env var name, got nil")
+	}
+	if got := ExitCodeFor(err); got != 2 {
+		t.Errorf("exit code = %d, want 2; err = %v", got, err)
+	}
+}
+
+func TestSignCommand_InvalidEnvVarName_KeyPassedDirectly(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	inFile := filepath.Join(t.TempDir(), "unsigned.json")
+	if err := os.WriteFile(inFile, unsignedTxJSON(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := newTestApp()
+	var buf bytes.Buffer
+	app.Writer = &buf
+	app.ErrWriter = &buf
+
+	// Simulate user accidentally passing the actual hex key as the env var name.
+	err := app.Run([]string{
+		"eth-deposit-tx", "sign",
+		"--signer", "local",
+		"--input", inFile,
+		"--private-key-env", "0x" + generateTestPrivKey(t),
+	})
+	if err == nil {
+		t.Fatal("expected error when hex key passed as env var name, got nil")
+	}
+	if got := ExitCodeFor(err); got != 2 {
+		t.Errorf("exit code = %d, want 2; err = %v", got, err)
+	}
+	if !strings.Contains(err.Error(), "POSIX") {
+		t.Errorf("error should mention POSIX; got: %v", err)
+	}
+}
+
+func TestSignCommand_OutputFilePermissions(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	envVar := "TEST_SIGN_KEY_PERM_" + randomSuffix(t)
+	t.Setenv(envVar, "0x"+generateTestPrivKey(t))
+
+	inFile := filepath.Join(t.TempDir(), "unsigned.json")
+	if err := os.WriteFile(inFile, unsignedTxJSON(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outFile := filepath.Join(t.TempDir(), "signed.json")
+
+	app := newTestApp()
+	var buf bytes.Buffer
+	app.Writer = &buf
+	app.ErrWriter = &buf
+
+	err := app.Run([]string{
+		"eth-deposit-tx", "sign",
+		"--signer", "local",
+		"--input", inFile,
+		"--output", outFile,
+		"--private-key-env", envVar,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	info, err := os.Stat(outFile)
+	if err != nil {
+		t.Fatalf("could not stat output file: %v", err)
+	}
+	// Must be 0o600 (owner read/write only).
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("output file permissions = %04o, want 0600", perm)
+	}
+}
+
 // randomSuffix returns a short random hex string for unique env var names.
 func randomSuffix(t *testing.T) string {
 	t.Helper()

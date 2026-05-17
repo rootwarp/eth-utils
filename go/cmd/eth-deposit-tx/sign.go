@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
 
 	ucli "github.com/urfave/cli/v2"
 
@@ -14,6 +15,10 @@ import (
 )
 
 const defaultPrivKeyEnvVar = "ETH_DEPOSIT_TX_PRIVATE_KEY"
+
+// posixEnvVarName matches valid POSIX env var names: uppercase letters, digits,
+// underscore; must start with letter or underscore.
+var posixEnvVarName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
 // SignConfig holds parsed, validated inputs for the sign subcommand.
 type SignConfig struct {
@@ -40,8 +45,11 @@ func LoadSignConfig(c *ucli.Context) (*SignConfig, error) {
 	}
 
 	envVar := c.String("private-key-env")
-	if envVar == "" {
-		envVar = defaultPrivKeyEnvVar
+	if !posixEnvVarName.MatchString(envVar) {
+		return nil, ucli.Exit(fmt.Sprintf(
+			"--private-key-env: %q is not a valid POSIX env var name (must match ^[A-Z_][A-Z0-9_]*$); did you accidentally pass the key value instead of a variable name?",
+			envVar,
+		), 2)
 	}
 
 	return &SignConfig{
@@ -181,8 +189,9 @@ func signAction(c *ucli.Context, cfg *SignConfig) error {
 		_, err = c.App.Writer.Write(out)
 		return err
 	}
-	if err := os.WriteFile(cfg.OutputFile, out, 0o644); err != nil {
-		return err
+	// 0o600: signed tx bytes contain sensitive metadata (from address, tx hash, etc.)
+	if err := os.WriteFile(cfg.OutputFile, out, 0o600); err != nil {
+		return ucli.Exit(fmt.Sprintf("--output: %v", err), 2)
 	}
 	slog.Info("wrote signed tx", "path", cfg.OutputFile, "signer", cfg.Signer)
 	return nil
