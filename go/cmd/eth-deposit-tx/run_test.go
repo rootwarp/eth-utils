@@ -317,23 +317,23 @@ func TestRunCommand_BadKey(t *testing.T) {
 	}
 }
 
-func TestRunCommand_AtomicWrite_OnSignFailure(t *testing.T) {
-	// Force a sign failure by providing a valid deposit fixture but a ChainID=0 unsigned tx.
-	// We can achieve this by using signer.ErrInvalidChainID which triggers when ChainID==0.
-	// Strategy: use a valid key but pass a deposit fixture and network that results in a valid
-	// unsigned tx, then verify that if signing fails for some reason (bad key), no partial
-	// signed.json appears.
+func TestRunCommand_AtomicWrite_OnRenameFailure(t *testing.T) {
+	// Force an OS-level rename failure by making the target output path an existing
+	// directory. os.Rename(tmpFile, dir) fails on most platforms with EISDIR/ENOTDIR,
+	// which exercises the defer os.Remove(tmpName) cleanup in atomicWriteFile.
 	orig := ucli.OsExiter
 	ucli.OsExiter = func(int) {}
 	t.Cleanup(func() { ucli.OsExiter = orig })
 
-	// Use a bad (too short) key to force a sign error (exit code 3).
-	envVar := "TEST_RUN_ATOMIC_BADKEY_" + randomSuffix(t)
-	t.Setenv(envVar, "0xdeadbeef") // invalid key
+	envVar := "TEST_RUN_ATOMIC_RENAME_" + randomSuffix(t)
+	t.Setenv(envVar, "0x"+generateTestPrivKey(t))
 
 	dir := t.TempDir()
-	outFile := filepath.Join(dir, "signed.json")
-	rawFile := filepath.Join(dir, "signed.raw")
+	// Create a directory at the output path so rename must fail.
+	outDir := filepath.Join(dir, "signed.json")
+	if err := os.Mkdir(outDir, 0o755); err != nil {
+		t.Fatalf("could not create output dir: %v", err)
+	}
 
 	app := newTestApp()
 	var buf bytes.Buffer
@@ -345,23 +345,20 @@ func TestRunCommand_AtomicWrite_OnSignFailure(t *testing.T) {
 		"--network", "holesky",
 		"--input-file", fixtureAbsPath(t),
 		"--signer", "local",
-		"--output", outFile,
+		"--output", outDir,
 		"--private-key-env", envVar,
 	})
 	if err == nil {
-		t.Fatal("expected error for bad key, got nil")
-	}
-	if got := ExitCodeFor(err); got != 3 {
-		t.Errorf("exit code = %d, want 3; err = %v", got, err)
+		t.Fatal("expected error when output path is a directory, got nil")
 	}
 
-	// Verify signed.json was NOT left behind.
-	if _, statErr := os.Stat(outFile); statErr == nil {
-		t.Error("signed.json should not exist after sign failure (atomic write)")
+	// No leftover temp files should remain.
+	matches, err := filepath.Glob(filepath.Join(dir, ".tmp-eth-deposit-tx-*"))
+	if err != nil {
+		t.Fatalf("glob error: %v", err)
 	}
-	// Verify signed.raw was NOT left behind.
-	if _, statErr := os.Stat(rawFile); statErr == nil {
-		t.Error("signed.raw should not exist after sign failure")
+	if len(matches) > 0 {
+		t.Errorf("leftover temp files after rename failure: %v", matches)
 	}
 }
 
