@@ -20,13 +20,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 	"strings"
 	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 
 	internaltx "github.com/rootwarp/eth-utils/go/internal/tx"
@@ -152,54 +150,20 @@ func (s *LedgerSigner) Sign(ctx context.Context, unsigned internaltx.UnsignedTx)
 		return nil, err
 	}
 
-	if unsigned.ChainID == 0 {
-		return nil, fmt.Errorf("ChainID must be non-zero: %w", ErrInvalidChainID)
-	}
-	chainID := new(big.Int).SetUint64(unsigned.ChainID)
-
-	value, ok := new(big.Int).SetString(strings.TrimPrefix(unsigned.Value, "0x"), 16)
-	if !ok {
-		return nil, fmt.Errorf("invalid Value hex %q", unsigned.Value)
+	p, err := parseUnsignedTx(unsigned)
+	if err != nil {
+		return nil, err
 	}
 
-	maxFeeHex := strings.TrimPrefix(unsigned.MaxFeePerGas, "0x")
-	if maxFeeHex == "" {
-		return nil, fmt.Errorf("MaxFeePerGas is required for EIP-1559 transactions")
-	}
-	maxFee, ok := new(big.Int).SetString(maxFeeHex, 16)
-	if !ok {
-		return nil, fmt.Errorf("invalid MaxFeePerGas hex %q", unsigned.MaxFeePerGas)
-	}
-
-	maxPrioHex := strings.TrimPrefix(unsigned.MaxPriorityFeePerGas, "0x")
-	if maxPrioHex == "" {
-		return nil, fmt.Errorf("MaxPriorityFeePerGas is required for EIP-1559 transactions")
-	}
-	maxPrio, ok := new(big.Int).SetString(maxPrioHex, 16)
-	if !ok {
-		return nil, fmt.Errorf("invalid MaxPriorityFeePerGas hex %q", unsigned.MaxPriorityFeePerGas)
-	}
-
-	dataHex := strings.TrimPrefix(unsigned.Data, "0x")
-	var data []byte
-	if dataHex != "" {
-		var err error
-		data, err = hex.DecodeString(dataHex)
-		if err != nil {
-			return nil, fmt.Errorf("invalid Data hex: %w", err)
-		}
-	}
-
-	to := common.HexToAddress(unsigned.To)
 	dynTx := &types.DynamicFeeTx{
-		ChainID:   chainID,
+		ChainID:   p.chainID,
 		Nonce:     unsigned.Nonce,
-		GasTipCap: maxPrio,
-		GasFeeCap: maxFee,
+		GasTipCap: p.tip,
+		GasFeeCap: p.maxFee,
 		Gas:       unsigned.Gas,
-		To:        &to,
-		Value:     value,
-		Data:      data,
+		To:        &p.to,
+		Value:     p.value,
+		Data:      p.data,
 	}
 	unsignedTx := types.NewTx(dynTx)
 
@@ -211,7 +175,7 @@ func (s *LedgerSigner) Sign(ctx context.Context, unsigned internaltx.UnsignedTx)
 	}
 	ch := make(chan signResult, 1)
 	go func() {
-		signed, err := s.wallet.SignTx(s.account, unsignedTx, chainID)
+		signed, err := s.wallet.SignTx(s.account, unsignedTx, p.chainID)
 		ch <- signResult{signed, err}
 	}()
 
@@ -235,7 +199,7 @@ func (s *LedgerSigner) Sign(ctx context.Context, unsigned internaltx.UnsignedTx)
 	}
 
 	signedTx := r.signed
-	ethSigner := types.LatestSignerForChainID(chainID)
+	ethSigner := types.LatestSignerForChainID(p.chainID)
 
 	v, rVal, sVal := signedTx.RawSignatureValues()
 

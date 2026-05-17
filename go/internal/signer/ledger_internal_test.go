@@ -48,7 +48,12 @@ type mockWallet struct {
 	SignTxFn func(account accounts.Account, tx *types.Transaction, chainID *big.Int) (*types.Transaction, error)
 }
 
-func (m *mockWallet) URL() accounts.URL { return m.URLFn() }
+func (m *mockWallet) URL() accounts.URL {
+	if m.URLFn != nil {
+		return m.URLFn()
+	}
+	return accounts.URL{}
+}
 func (m *mockWallet) Open(p string) error {
 	if m.OpenFn != nil {
 		return m.OpenFn(p)
