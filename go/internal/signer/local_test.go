@@ -306,6 +306,85 @@ func TestLocalSigner_RequiresUserInteraction(t *testing.T) {
 	}
 }
 
+// --- Must Fix 1: ChainID=0 rejection ---
+
+func TestLocalSigner_Sign_ChainID0_Rejected(t *testing.T) {
+	keyHex, _ := validHexKey(t)
+	s, err := signer.NewLocalSignerFromHex(keyHex)
+	if err != nil {
+		t.Fatalf("NewLocalSignerFromHex: %v", err)
+	}
+	defer s.Close()
+	unsigned := holeskyUnsignedTx()
+	unsigned.ChainID = 0
+	_, err = s.Sign(context.Background(), unsigned)
+	if !errors.Is(err, signer.ErrInvalidChainID) {
+		t.Fatalf("want ErrInvalidChainID, got %v", err)
+	}
+}
+
+// --- Must Fix 2: Empty/invalid gas field rejection ---
+
+func TestLocalSigner_Sign_EmptyMaxFeePerGas_Rejected(t *testing.T) {
+	keyHex, _ := validHexKey(t)
+	s, err := signer.NewLocalSignerFromHex(keyHex)
+	if err != nil {
+		t.Fatalf("NewLocalSignerFromHex: %v", err)
+	}
+	defer s.Close()
+	unsigned := holeskyUnsignedTx()
+	unsigned.MaxFeePerGas = ""
+	_, err = s.Sign(context.Background(), unsigned)
+	if err == nil {
+		t.Fatal("expected error for empty MaxFeePerGas")
+	}
+}
+
+func TestLocalSigner_Sign_EmptyMaxPriorityFeePerGas_Rejected(t *testing.T) {
+	keyHex, _ := validHexKey(t)
+	s, err := signer.NewLocalSignerFromHex(keyHex)
+	if err != nil {
+		t.Fatalf("NewLocalSignerFromHex: %v", err)
+	}
+	defer s.Close()
+	unsigned := holeskyUnsignedTx()
+	unsigned.MaxPriorityFeePerGas = ""
+	_, err = s.Sign(context.Background(), unsigned)
+	if err == nil {
+		t.Fatal("expected error for empty MaxPriorityFeePerGas")
+	}
+}
+
+func TestLocalSigner_Sign_InvalidMaxFeeHex_Rejected(t *testing.T) {
+	keyHex, _ := validHexKey(t)
+	s, err := signer.NewLocalSignerFromHex(keyHex)
+	if err != nil {
+		t.Fatalf("NewLocalSignerFromHex: %v", err)
+	}
+	defer s.Close()
+	unsigned := holeskyUnsignedTx()
+	unsigned.MaxFeePerGas = "0xgg"
+	_, err = s.Sign(context.Background(), unsigned)
+	if err == nil {
+		t.Fatal("expected error for invalid MaxFeePerGas hex")
+	}
+}
+
+func TestLocalSigner_Sign_InvalidMaxPriorityFeeHex_Rejected(t *testing.T) {
+	keyHex, _ := validHexKey(t)
+	s, err := signer.NewLocalSignerFromHex(keyHex)
+	if err != nil {
+		t.Fatalf("NewLocalSignerFromHex: %v", err)
+	}
+	defer s.Close()
+	unsigned := holeskyUnsignedTx()
+	unsigned.MaxPriorityFeePerGas = "0xgg"
+	_, err = s.Sign(context.Background(), unsigned)
+	if err == nil {
+		t.Fatal("expected error for invalid MaxPriorityFeePerGas hex")
+	}
+}
+
 // TestLocalSigner_Sign_VariousChainIDs verifies signing works for mainnet and other chains.
 func TestLocalSigner_Sign_VariousChainIDs(t *testing.T) {
 	keyHex, _ := validHexKey(t)

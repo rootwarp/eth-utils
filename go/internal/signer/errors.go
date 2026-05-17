@@ -23,6 +23,11 @@ var (
 	// for the requested chain ID (e.g., Ledger refuses an unknown network).
 	ErrChainIDMismatch = errors.New("chain ID mismatch")
 
+	// ErrInvalidChainID indicates the unsigned transaction has chain ID 0 or
+	// another value the signer cannot handle (distinct from ErrChainIDMismatch,
+	// which is a mismatch between two otherwise-valid IDs).
+	ErrInvalidChainID = errors.New("invalid chain ID")
+
 	// ErrSignerClosed indicates Sign was called after Close.
 	ErrSignerClosed = errors.New("signer is closed")
 )

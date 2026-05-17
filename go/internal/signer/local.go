@@ -80,6 +80,9 @@ func (s *LocalSigner) Sign(ctx context.Context, unsigned internaltx.UnsignedTx) 
 		return nil, err
 	}
 
+	if unsigned.ChainID == 0 {
+		return nil, fmt.Errorf("ChainID must be non-zero: %w", ErrInvalidChainID)
+	}
 	chainID := new(big.Int).SetUint64(unsigned.ChainID)
 
 	value, ok := new(big.Int).SetString(strings.TrimPrefix(unsigned.Value, "0x"), 16)
@@ -87,22 +90,22 @@ func (s *LocalSigner) Sign(ctx context.Context, unsigned internaltx.UnsignedTx) 
 		return nil, fmt.Errorf("invalid Value hex %q", unsigned.Value)
 	}
 
-	var maxFee *big.Int
-	if unsigned.MaxFeePerGas != "" {
-		f, ok := new(big.Int).SetString(strings.TrimPrefix(unsigned.MaxFeePerGas, "0x"), 16)
-		if !ok {
-			return nil, fmt.Errorf("invalid MaxFeePerGas hex %q", unsigned.MaxFeePerGas)
-		}
-		maxFee = f
+	maxFeeHex := strings.TrimPrefix(unsigned.MaxFeePerGas, "0x")
+	if maxFeeHex == "" {
+		return nil, fmt.Errorf("MaxFeePerGas is required for EIP-1559 transactions")
+	}
+	maxFee, ok := new(big.Int).SetString(maxFeeHex, 16)
+	if !ok {
+		return nil, fmt.Errorf("invalid MaxFeePerGas hex %q", unsigned.MaxFeePerGas)
 	}
 
-	var maxPrio *big.Int
-	if unsigned.MaxPriorityFeePerGas != "" {
-		p, ok := new(big.Int).SetString(strings.TrimPrefix(unsigned.MaxPriorityFeePerGas, "0x"), 16)
-		if !ok {
-			return nil, fmt.Errorf("invalid MaxPriorityFeePerGas hex %q", unsigned.MaxPriorityFeePerGas)
-		}
-		maxPrio = p
+	maxPrioHex := strings.TrimPrefix(unsigned.MaxPriorityFeePerGas, "0x")
+	if maxPrioHex == "" {
+		return nil, fmt.Errorf("MaxPriorityFeePerGas is required for EIP-1559 transactions")
+	}
+	maxPrio, ok := new(big.Int).SetString(maxPrioHex, 16)
+	if !ok {
+		return nil, fmt.Errorf("invalid MaxPriorityFeePerGas hex %q", unsigned.MaxPriorityFeePerGas)
 	}
 
 	dataHex := strings.TrimPrefix(unsigned.Data, "0x")
