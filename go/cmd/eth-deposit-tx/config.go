@@ -15,6 +15,7 @@ import (
 const defaultGasLimit uint64 = 250_000
 
 // defaultMaxFeePerGas returns 20 Gwei as the fallback EIP-1559 max fee.
+// 20 gwei is a testnet baseline; may be too low for mainnet.
 func defaultMaxFeePerGas() *big.Int { return big.NewInt(20_000_000_000) }
 
 // defaultMaxPriorityFeePerGas returns 1 Gwei as the fallback EIP-1559 tip.
@@ -58,8 +59,6 @@ type Config struct {
 // It validates the result before returning. Unknown network or invalid numeric
 // inputs produce an error with exit code 2 via ucli.Exit so callers can return
 // the error directly to urfave.
-//
-// TODO(1.5): replace the literal exit code 2 with the exit-code constants.
 func LoadBuildConfig(c *ucli.Context) (*Config, error) {
 	// 1. Network — parse and look up constants.
 	net, err := network.ParseFlag(c.String("network"))
@@ -78,6 +77,9 @@ func LoadBuildConfig(c *ucli.Context) (*Config, error) {
 		if err != nil {
 			return nil, ucli.Exit(fmt.Sprintf("--gas-limit: invalid value %q: must be a positive integer", s), 2)
 		}
+		if v == 0 {
+			return nil, ucli.Exit("--gas-limit: must be greater than zero", 2)
+		}
 		gasLimit = v
 	}
 
@@ -88,6 +90,9 @@ func LoadBuildConfig(c *ucli.Context) (*Config, error) {
 		if !ok {
 			return nil, ucli.Exit(fmt.Sprintf("--max-fee-per-gas: invalid value %q: must be a decimal integer in wei", s), 2)
 		}
+		if v.Sign() < 0 {
+			return nil, ucli.Exit(fmt.Sprintf("--max-fee-per-gas: value must be non-negative, got %s", s), 2)
+		}
 		maxFee = v
 	}
 
@@ -97,6 +102,9 @@ func LoadBuildConfig(c *ucli.Context) (*Config, error) {
 		v, ok := new(big.Int).SetString(s, 10)
 		if !ok {
 			return nil, ucli.Exit(fmt.Sprintf("--max-priority-fee-per-gas: invalid value %q: must be a decimal integer in wei", s), 2)
+		}
+		if v.Sign() < 0 {
+			return nil, ucli.Exit(fmt.Sprintf("--max-priority-fee-per-gas: value must be non-negative, got %s", s), 2)
 		}
 		maxPrioFee = v
 	}

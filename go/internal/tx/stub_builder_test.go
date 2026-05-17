@@ -1,7 +1,7 @@
-// Package tx — STUB (Phase 1 only; replaced by real ABI-encoding builder in Phase 2).
 package tx
 
 import (
+	"errors"
 	"math/big"
 	"strings"
 	"testing"
@@ -173,5 +173,41 @@ func TestBuildUnsigned_CalldataStartsWithSelector(t *testing.T) {
 	}
 	if !strings.HasPrefix(tx.Data, "0x22895118") {
 		t.Errorf("Data must start with deposit() selector 0x22895118, got: %q", tx.Data)
+	}
+}
+
+func TestBuildUnsigned_NilMaxFeePerGas(t *testing.T) {
+	entry := makeHoleskyEntry()
+	params := holeskyParams(t)
+	cfg := StubConfig{
+		NetworkParams:        params,
+		GasLimit:             250_000,
+		MaxFeePerGas:         nil,
+		MaxPriorityFeePerGas: big.NewInt(1_000_000_000),
+	}
+	_, err := BuildUnsigned(entry, cfg)
+	if err == nil {
+		t.Fatal("expected error for nil MaxFeePerGas, got nil")
+	}
+	if !errors.Is(err, ErrNilFeeField) {
+		t.Errorf("expected ErrNilFeeField, got: %v", err)
+	}
+}
+
+func TestBuildUnsigned_NilMaxPriorityFeePerGas(t *testing.T) {
+	entry := makeHoleskyEntry()
+	params := holeskyParams(t)
+	cfg := StubConfig{
+		NetworkParams:        params,
+		GasLimit:             250_000,
+		MaxFeePerGas:         big.NewInt(20_000_000_000),
+		MaxPriorityFeePerGas: nil,
+	}
+	_, err := BuildUnsigned(entry, cfg)
+	if err == nil {
+		t.Fatal("expected error for nil MaxPriorityFeePerGas, got nil")
+	}
+	if !errors.Is(err, ErrNilFeeField) {
+		t.Errorf("expected ErrNilFeeField, got: %v", err)
 	}
 }

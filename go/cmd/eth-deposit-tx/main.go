@@ -1,15 +1,24 @@
 // Package main is the entry point for eth-deposit-tx.
 // It sets up the urfave/cli/v2 application and wires the build and sign subcommands.
 //
-// This is the initial scaffold created in Issue 1.1. It will be expanded in later issues
-// to use the internal/cli package and full dependency injection pattern (matching eth-deposit-gen).
+// Exit codes:
+//
+//	0 — success
+//	2 — user / configuration error (bad input, unknown network, missing file, etc.)
+//	3 — signer / crypto error (reserved for Phase 3)
+//	4 — user abort (SIGINT)
+//	1 — unexpected / internal error
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	ucli "github.com/urfave/cli/v2"
 
@@ -26,6 +35,11 @@ var (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT)
+	defer stop()
+
 	app := &ucli.App{
 		Name:  "eth-deposit-tx",
 		Usage: "Create and sign Ethereum deposit transactions from deposit data JSON",
@@ -39,16 +53,20 @@ It supports a secure two-phase workflow:
   build  - Construct an unsigned transaction (supports offline/air-gapped mode)
   sign   - Sign the transaction, with Ledger hardware as the primary method
 
-The tool produces standard hex-encoded RLP output ready for eth_sendRawTransaction.`,
+The tool produces standard hex-encoded RLP output ready for eth_sendRawTransaction.
+
+Exit codes: 0=success, 1=internal error, 2=bad input, 3=signer error (Phase 3), 4=user abort.`,
 		Commands: []*ucli.Command{
 			buildCommand(),
 			signCommand(),
 		},
+		// Suppress urfave's default ExitCoder printer; we log via slog below.
+		ExitErrHandler: func(_ *ucli.Context, _ error) {},
 	}
 
-	if err := app.Run(os.Args); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+	if err := app.RunContext(ctx, os.Args); err != nil {
+		slog.Error("fatal", "err", err)
+		os.Exit(ExitCodeFor(err))
 	}
 }
 
@@ -165,7 +183,7 @@ Supports both hybrid mode (with optional --rpc-url) and fully offline/air-gapped
 
 			unsignedTx, err := internaltx.BuildUnsigned(entry, stubCfg)
 			if err != nil {
-				return ucli.Exit(fmt.Sprintf("build: %v", err), 2)
+				return WrapInputErr("build", err)
 			}
 
 			out, err := json.MarshalIndent(unsignedTx, "", "  ")
@@ -178,7 +196,11 @@ Supports both hybrid mode (with optional --rpc-url) and fully offline/air-gapped
 				_, err = c.App.Writer.Write(out)
 				return err
 			}
-			return os.WriteFile(cfg.OutputFile, out, 0o644)
+			if err := os.WriteFile(cfg.OutputFile, out, 0o644); err != nil {
+				return err
+			}
+			slog.Info("wrote unsigned tx", "path", cfg.OutputFile, "network", cfg.Network)
+			return nil
 		},
 	}
 }

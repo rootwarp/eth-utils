@@ -206,3 +206,33 @@ func TestLoadBuildConfig_GasLimitEnvVar(t *testing.T) {
 		t.Errorf("GasLimit: expected env override 500000, got %d", cfg.GasLimit)
 	}
 }
+
+func TestLoadBuildConfig_GasLimitZero(t *testing.T) {
+	_, err := captureConfig(t, []string{
+		"build", "--network", "holesky", "--input-file", "deposit.json",
+		"--gas-limit", "0",
+	})
+	if err == nil {
+		t.Fatal("expected error for --gas-limit=0, got nil")
+	}
+}
+
+func TestLoadBuildConfig_NegativeMaxFeePerGas(t *testing.T) {
+	_, err := captureConfig(t, []string{
+		"build", "--network", "holesky", "--input-file", "deposit.json",
+		"--max-fee-per-gas", "-100",
+	})
+	if err == nil {
+		t.Fatal("expected error for --max-fee-per-gas=-100, got nil")
+	}
+}
+
+func TestLoadBuildConfig_NegativeMaxPriorityFeePerGas(t *testing.T) {
+	_, err := captureConfig(t, []string{
+		"build", "--network", "holesky", "--input-file", "deposit.json",
+		"--max-priority-fee-per-gas", "-1",
+	})
+	if err == nil {
+		t.Fatal("expected error for --max-priority-fee-per-gas=-1, got nil")
+	}
+}

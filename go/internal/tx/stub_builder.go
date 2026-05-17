@@ -9,12 +9,16 @@ package tx
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/rootwarp/eth-utils/go/internal/deposit"
 	"github.com/rootwarp/eth-utils/go/internal/network"
 )
+
+// ErrNilFeeField is returned when MaxFeePerGas or MaxPriorityFeePerGas is nil.
+var ErrNilFeeField = errors.New("fee field must not be nil")
 
 // depositSelector is the 4-byte Keccak-256 selector for deposit(bytes,bytes,bytes,bytes32).
 const depositSelector = "22895118"
@@ -48,6 +52,13 @@ type StubConfig struct {
 //
 // Phase 2 will replace this function with one that performs real ABI encoding.
 func BuildUnsigned(entry deposit.Entry, cfg StubConfig) (*UnsignedTx, error) {
+	if cfg.MaxFeePerGas == nil {
+		return nil, fmt.Errorf("StubConfig.MaxFeePerGas: %w", ErrNilFeeField)
+	}
+	if cfg.MaxPriorityFeePerGas == nil {
+		return nil, fmt.Errorf("StubConfig.MaxPriorityFeePerGas: %w", ErrNilFeeField)
+	}
+
 	// Derive value in wei from the entry amount (stored in Gwei).
 	// 1 Gwei = 1e9 wei.
 	amountWei := new(big.Int).Mul(

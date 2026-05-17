@@ -1,4 +1,3 @@
-// Package tx — STUB (Phase 1 only; replaced by real ABI-encoding builder in Phase 2).
 package tx
 
 // UnsignedTx is the unsigned EIP-1559 deposit transaction envelope.
