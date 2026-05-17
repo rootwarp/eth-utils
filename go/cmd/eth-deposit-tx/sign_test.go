@@ -489,6 +489,48 @@ func TestSignCommand_OutputFilePermissions(t *testing.T) {
 	}
 }
 
+func TestSignCommand_OutputDash_IsStdout(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	envVar := "TEST_SIGN_KEY_DASH_" + randomSuffix(t)
+	t.Setenv(envVar, "0x"+generateTestPrivKey(t))
+
+	inFile := filepath.Join(t.TempDir(), "unsigned.json")
+	if err := os.WriteFile(inFile, unsignedTxJSON(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := newTestApp()
+	var out bytes.Buffer
+	app.Writer = &out
+	app.ErrWriter = &bytes.Buffer{}
+
+	err := app.Run([]string{
+		"eth-deposit-tx", "sign",
+		"--signer", "local",
+		"--input", inFile,
+		"--output", "-",
+		"--private-key-env", envVar,
+	})
+	if err != nil {
+		t.Fatalf("--output -: unexpected error: %v", err)
+	}
+
+	if !json.Valid(out.Bytes()) {
+		t.Errorf("--output -: output is not valid JSON: %s", out.String())
+	}
+
+	var signed map[string]interface{}
+	if err := json.Unmarshal(out.Bytes(), &signed); err != nil {
+		t.Fatalf("stdout JSON parse failed: %v", err)
+	}
+	if _, ok := signed["rawRLP"]; !ok {
+		t.Error("stdout JSON missing field rawRLP")
+	}
+}
+
 // randomSuffix returns a short random hex string for unique env var names.
 func randomSuffix(t *testing.T) string {
 	t.Helper()

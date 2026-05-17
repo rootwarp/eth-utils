@@ -163,7 +163,7 @@ func signAction(c *ucli.Context, cfg *SignConfig) error {
 	out = append(out, '\n')
 
 	// 5. Write output.
-	if cfg.OutputFile == "" {
+	if cfg.OutputFile == "" || cfg.OutputFile == "-" {
 		_, err = c.App.Writer.Write(out)
 		return err
 	}
