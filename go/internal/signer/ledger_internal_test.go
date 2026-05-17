@@ -566,6 +566,168 @@ func TestLedgerSigner_Sign_Closed(t *testing.T) {
 	}
 }
 
+func TestLedgerSigner_Sign_UserRejected_Denied(t *testing.T) {
+	w := &mockWallet{
+		SignTxFn: func(_ accounts.Account, _ *types.Transaction, _ *big.Int) (*types.Transaction, error) {
+			return nil, errors.New("transaction denied by user")
+		},
+	}
+	withMockHub(t, &mockHub{wallets: []ledgerWallet{w}})
+
+	s, err := NewLedgerSigner()
+	if err != nil {
+		t.Fatalf("NewLedgerSigner: %v", err)
+	}
+	defer s.Close()
+	s.setConfirmationPrompt(&bytes.Buffer{})
+
+	_, err = s.Sign(context.Background(), internaltxUnsigned())
+	if !errors.Is(err, ErrUserRejected) {
+		t.Fatalf("expected ErrUserRejected for 'denied', got %v", err)
+	}
+}
+
+// TestLedgerSigner_Sign_AmbiguousError_ChainCancelledByUser verifies that an error
+// containing both "cancel" (user-rejection indicator) and "chain" is classified as
+// ErrUserRejected. The isChainIDMismatchErr heuristic requires "unknown" or "mismatch"
+// or "6a80"/"6a81" in addition to "chain", so "user cancelled chain operation" does
+// NOT match the chain-ID heuristic — it falls through to the user-rejected check.
+// This is documented behavior; TODO: refine after real hardware testing.
+func TestLedgerSigner_Sign_AmbiguousError_ChainCancelledByUser(t *testing.T) {
+	w := &mockWallet{
+		SignTxFn: func(_ accounts.Account, _ *types.Transaction, _ *big.Int) (*types.Transaction, error) {
+			return nil, errors.New("user cancelled chain operation")
+		},
+	}
+	withMockHub(t, &mockHub{wallets: []ledgerWallet{w}})
+
+	s, err := NewLedgerSigner()
+	if err != nil {
+		t.Fatalf("NewLedgerSigner: %v", err)
+	}
+	defer s.Close()
+	s.setConfirmationPrompt(&bytes.Buffer{})
+
+	_, err = s.Sign(context.Background(), internaltxUnsigned())
+	// "user cancelled chain operation" contains "chain" + "cancel" but NOT
+	// "unknown"/"mismatch"/"6a80"/"6a81", so isChainIDMismatchErr returns false.
+	// isUserRejectedErr matches "cancel" → ErrUserRejected.
+	if !errors.Is(err, ErrUserRejected) {
+		t.Fatalf("expected ErrUserRejected for ambiguous cancel+chain error, got %v", err)
+	}
+}
+
+func TestLedgerSigner_Sign_ChainIDMismatch_APDU6a81(t *testing.T) {
+	w := &mockWallet{
+		SignTxFn: func(_ accounts.Account, _ *types.Transaction, _ *big.Int) (*types.Transaction, error) {
+			return nil, errors.New("apdu error: 6a81 chain not supported")
+		},
+	}
+	withMockHub(t, &mockHub{wallets: []ledgerWallet{w}})
+
+	s, err := NewLedgerSigner()
+	if err != nil {
+		t.Fatalf("NewLedgerSigner: %v", err)
+	}
+	defer s.Close()
+	s.setConfirmationPrompt(&bytes.Buffer{})
+
+	_, err = s.Sign(context.Background(), internaltxUnsigned())
+	if !errors.Is(err, ErrChainIDMismatch) {
+		t.Fatalf("expected ErrChainIDMismatch for APDU 6a81, got %v", err)
+	}
+}
+
+// TestLedgerSigner_Sign_AppNotOpen_APDU6d00 verifies that APDU code 6d00
+// in a SignTx error is treated as a generic ledger error (not a user rejection).
+// The isAppNotOpenErr heuristic only applies at construction time (Open/Status);
+// during Sign, 6d00 would be an unexpected app state, mapped to a generic error.
+func TestLedgerSigner_Sign_UnknownAPDUCode_NotSentinel(t *testing.T) {
+	w := &mockWallet{
+		SignTxFn: func(_ accounts.Account, _ *types.Transaction, _ *big.Int) (*types.Transaction, error) {
+			return nil, errors.New("apdu error: 6f00 unknown error")
+		},
+	}
+	withMockHub(t, &mockHub{wallets: []ledgerWallet{w}})
+
+	s, err := NewLedgerSigner()
+	if err != nil {
+		t.Fatalf("NewLedgerSigner: %v", err)
+	}
+	defer s.Close()
+	s.setConfirmationPrompt(&bytes.Buffer{})
+
+	_, err = s.Sign(context.Background(), internaltxUnsigned())
+	if err == nil {
+		t.Fatal("expected non-nil error for unknown APDU code")
+	}
+	if errors.Is(err, ErrUserRejected) || errors.Is(err, ErrChainIDMismatch) {
+		t.Errorf("unexpected sentinel for unknown APDU error: %v", err)
+	}
+}
+
+func TestLedgerSigner_Sign_InvalidMaxPrioHex(t *testing.T) {
+	w := &mockWallet{}
+	withMockHub(t, &mockHub{wallets: []ledgerWallet{w}})
+
+	s, err := NewLedgerSigner()
+	if err != nil {
+		t.Fatalf("NewLedgerSigner: %v", err)
+	}
+	defer s.Close()
+	s.setConfirmationPrompt(&bytes.Buffer{})
+
+	unsigned := internaltxUnsigned()
+	unsigned.MaxPriorityFeePerGas = "0xzz"
+	_, err = s.Sign(context.Background(), unsigned)
+	if err == nil {
+		t.Fatal("expected error for invalid MaxPriorityFeePerGas hex")
+	}
+}
+
+func TestLedgerSigner_Sign_InvalidData(t *testing.T) {
+	w := &mockWallet{}
+	withMockHub(t, &mockHub{wallets: []ledgerWallet{w}})
+
+	s, err := NewLedgerSigner()
+	if err != nil {
+		t.Fatalf("NewLedgerSigner: %v", err)
+	}
+	defer s.Close()
+	s.setConfirmationPrompt(&bytes.Buffer{})
+
+	unsigned := internaltxUnsigned()
+	unsigned.Data = "0xnotvalidhex"
+	_, err = s.Sign(context.Background(), unsigned)
+	if err == nil {
+		t.Fatal("expected error for invalid Data hex")
+	}
+}
+
+func TestLedgerSigner_Sign_AppNotOpen_APDU6e01(t *testing.T) {
+	w := &mockWallet{
+		OpenFn: func(_ string) error { return errors.New("ledger: apdu 6e01 returned") },
+	}
+	withMockHub(t, &mockHub{wallets: []ledgerWallet{w}})
+
+	_, err := NewLedgerSigner()
+	if !errors.Is(err, ErrAppNotOpen) {
+		t.Fatalf("expected ErrAppNotOpen for 6e01, got %v", err)
+	}
+}
+
+func TestLedgerSigner_Sign_AppNotOpen_TextHint(t *testing.T) {
+	w := &mockWallet{
+		OpenFn: func(_ string) error { return errors.New("please open the ethereum app on your ledger") },
+	}
+	withMockHub(t, &mockHub{wallets: []ledgerWallet{w}})
+
+	_, err := NewLedgerSigner()
+	if !errors.Is(err, ErrAppNotOpen) {
+		t.Fatalf("expected ErrAppNotOpen for text hint, got %v", err)
+	}
+}
+
 func TestLedgerSigner_Sign_ConfirmationPrompt(t *testing.T) {
 	unsigned := internaltxUnsigned()
 	synth, acc := synthSignedTx(t, unsigned)

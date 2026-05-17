@@ -71,7 +71,9 @@ func TestSentinelErrors(t *testing.T) {
 		signer.ErrAppNotOpen,
 		signer.ErrInvalidKey,
 		signer.ErrChainIDMismatch,
+		signer.ErrInvalidChainID,
 		signer.ErrSignerClosed,
+		signer.ErrLedgerNotSupported,
 	}
 	for _, e := range errs {
 		if e == nil {
