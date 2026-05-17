@@ -440,6 +440,9 @@ func TestRunCommand_OutputDash_IsStdout(t *testing.T) {
 	envVar := "TEST_RUN_KEY_DASH_" + randomSuffix(t)
 	t.Setenv(envVar, "0x"+generateTestPrivKey(t))
 
+	// Use a stable dir so the *.raw glob below is meaningful (not a fresh empty dir).
+	dir := t.TempDir()
+
 	app := newTestApp()
 	var out bytes.Buffer
 	app.Writer = &out
@@ -459,10 +462,11 @@ func TestRunCommand_OutputDash_IsStdout(t *testing.T) {
 	if !json.Valid(out.Bytes()) {
 		t.Errorf("--output -: output is not valid JSON: %s", out.String())
 	}
-	// No signed.raw should appear anywhere (stdout mode).
-	matches, _ := filepath.Glob(filepath.Join(t.TempDir(), "*.raw"))
+	// No .raw companion should be written when output is stdout ("-").
+	// We glob dir (same temp dir used above) to catch any stray files the run wrote.
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.raw"))
 	if len(matches) > 0 {
-		t.Errorf("--output -: unexpected .raw files: %v", matches)
+		t.Errorf("--output -: unexpected .raw files in temp dir: %v", matches)
 	}
 }
 
