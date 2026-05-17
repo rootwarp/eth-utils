@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## eth-deposit-tx
 
-### [0.1.0] - 2026-05-18
+### [eth-deposit-tx 0.1.0] - 2026-05-18
 
 First release. Builds, signs, and broadcasts Beacon Chain deposit transactions
 from Launchpad-compatible deposit data JSON. Use v0.1.0 because Ledger heuristics
@@ -59,7 +59,7 @@ against real hardware are not yet refined — that refinement is tracked for v0.
 
 ## eth-deposit-gen
 
-### [1.0.0] - 2026-05-17
+### [eth-deposit-gen 1.0.0] - 2026-05-17
 
 #### Added
 
