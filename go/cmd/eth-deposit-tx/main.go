@@ -62,26 +62,63 @@ Supports both hybrid mode (with optional --rpc-url) and fully offline/air-gapped
 				Aliases:  []string{"i"},
 				Usage:    "Path to deposit_data-*.json file (or '-' for stdin)",
 				Required: true,
+				EnvVars:  []string{"ETH_DEPOSIT_TX_INPUT_FILE"},
 			},
 			&ucli.StringFlag{
 				Name:    "network",
 				Aliases: []string{"n"},
 				Usage:   "Target network (mainnet, hoodi, sepolia, holesky)",
 				Value:   "hoodi",
+				EnvVars: []string{"ETH_DEPOSIT_TX_NETWORK"},
 			},
 			&ucli.StringFlag{
-				Name:  "output",
-				Usage: "Output file for the unsigned transaction (default: stdout)",
+				Name:    "output",
+				Usage:   "Output file for the unsigned transaction (default: stdout)",
+				EnvVars: []string{"ETH_DEPOSIT_TX_OUTPUT"},
 			},
 			&ucli.IntFlag{
-				Name:  "index",
-				Usage: "Index of the deposit entry to use when the JSON contains multiple validators (default: 0)",
-				Value: 0,
+				Name:    "index",
+				Usage:   "Index of the deposit entry to use when the JSON contains multiple validators (default: 0)",
+				Value:   0,
+				EnvVars: []string{"ETH_DEPOSIT_TX_INDEX"},
+			},
+			&ucli.StringFlag{
+				Name:    "rpc-url",
+				Usage:   "JSON-RPC endpoint URL for gas/nonce estimation (optional; when omitted, all gas and nonce flags must be supplied explicitly)",
+				EnvVars: []string{"ETH_DEPOSIT_TX_RPC_URL"},
+			},
+			&ucli.StringFlag{
+				Name:    "gas-limit",
+				Usage:   fmt.Sprintf("Gas limit for the deposit transaction (default: %d)", defaultGasLimit),
+				EnvVars: []string{"ETH_DEPOSIT_TX_GAS_LIMIT"},
+			},
+			&ucli.StringFlag{
+				Name:    "max-fee-per-gas",
+				Usage:   "EIP-1559 maximum fee per gas in wei (decimal integer, e.g. 20000000000 for 20 Gwei)",
+				EnvVars: []string{"ETH_DEPOSIT_TX_MAX_FEE_PER_GAS"},
+			},
+			&ucli.StringFlag{
+				Name:    "max-priority-fee-per-gas",
+				Usage:   "EIP-1559 maximum priority fee per gas in wei (decimal integer, e.g. 1000000000 for 1 Gwei)",
+				EnvVars: []string{"ETH_DEPOSIT_TX_MAX_PRIORITY_FEE_PER_GAS"},
+			},
+			&ucli.StringFlag{
+				Name:    "nonce",
+				Usage:   "Override the sender account nonce (non-negative integer; omit to fetch from RPC or set later)",
+				EnvVars: []string{"ETH_DEPOSIT_TX_NONCE"},
 			},
 		},
 		Action: func(c *ucli.Context) error {
-			fmt.Fprintf(c.App.Writer, "build command placeholder (Issue 1.1 scaffold)\n")
-			fmt.Fprintf(c.App.Writer, "This will be fully implemented in Phase 2.\n")
+			cfg, err := LoadBuildConfig(c)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(c.App.Writer,
+				"build: would build for network=%s chain_id=%d contract=%s (Phase 2 will perform real ABI encoding)\n",
+				cfg.Network,
+				cfg.NetworkParams.ChainID,
+				cfg.NetworkParams.DepositContractAddressHex(),
+			)
 			return nil
 		},
 	}

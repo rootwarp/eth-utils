@@ -76,6 +76,68 @@ func TestSignSubcommand_Help(t *testing.T) {
 	}
 }
 
+func TestBuildSubcommand_Action_Success(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	app := newTestApp()
+	var out bytes.Buffer
+	app.Writer = &out
+	app.ErrWriter = &out
+
+	err := app.Run([]string{"eth-deposit-tx", "build", "--network", "holesky", "--input-file", "deposit.json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "network=holesky") {
+		t.Errorf("action output missing network, got: %s", s)
+	}
+	if !strings.Contains(s, "chain_id=17000") {
+		t.Errorf("action output missing chain_id, got: %s", s)
+	}
+	if !strings.Contains(s, "contract=0x") {
+		t.Errorf("action output missing contract address, got: %s", s)
+	}
+}
+
+func TestBuildSubcommand_Action_BadNetwork(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	app := newTestApp()
+	var out bytes.Buffer
+	app.Writer = &out
+	app.ErrWriter = &out
+
+	err := app.Run([]string{"eth-deposit-tx", "build", "--network", "badnet", "--input-file", "deposit.json"})
+	if err == nil {
+		t.Fatal("expected error for unknown network, got nil")
+	}
+}
+
+func TestSignSubcommand_Action(t *testing.T) {
+	orig := ucli.OsExiter
+	ucli.OsExiter = func(code int) {}
+	t.Cleanup(func() { ucli.OsExiter = orig })
+
+	app := newTestApp()
+	var out bytes.Buffer
+	app.Writer = &out
+	app.ErrWriter = &out
+
+	err := app.Run([]string{"eth-deposit-tx", "sign", "--input", "unsigned.hex"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "sign command placeholder") {
+		t.Errorf("sign action output unexpected: %s", s)
+	}
+}
+
 // newTestApp returns a minimal app instance for testing (avoids side effects of the real main).
 func newTestApp() *ucli.App {
 	return &ucli.App{
